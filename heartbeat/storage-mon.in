@@ -167,8 +167,8 @@ storage-mon_init() {
 		exit $OCF_ERR_INSTALLED
 	fi
 
-	if [ ! -x "${HA_SBIN_DIR}/attrd_updater" ] ; then
-		ocf_log err "${HA_SBIN_DIR}/attrd_updater not installed."
+	if [ ! -x "$ATTRDUP" ] ; then
+		ocf_log err "${ATTRDUP} not installed."
 		exit $OCF_ERR_INSTALLED
 	fi
 
