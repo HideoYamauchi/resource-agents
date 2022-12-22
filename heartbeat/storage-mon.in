@@ -58,7 +58,7 @@ OCF_RESKEY_io_timeout_default="10"
 OCF_RESKEY_check_interval_default="30"
 OCF_RESKEY_inject_errors_default=""
 OCF_RESKEY_state_file_default="${HA_RSCTMP%%/}/storage-mon-${OCF_RESOURCE_INSTANCE}.state"
-OCF_RESKEY_options_default=""
+OCF_RESKEY_daemonize_default=""
 
 # Explicitly list all environment variables used, to make static analysis happy
 : ${OCF_RESKEY_CRM_meta_interval:=${OCF_RESKEY_CRM_meta_interval_default}}
@@ -66,7 +66,7 @@ OCF_RESKEY_options_default=""
 : ${OCF_RESKEY_io_timeout:=${OCF_RESKEY_io_timeout_default}}
 : ${OCF_RESKEY_inject_errors:=${OCF_RESKEY_inject_errors_default}}
 : ${OCF_RESKEY_state_file:=${OCF_RESKEY_state_file_default}}
-: ${OCF_RESKEY_options:=${OCF_RESKEY_options_default}}
+: ${OCF_RESKEY_daemonize:=${OCF_RESKEY_daemonize_default}}
 
 #######################################################################
 
@@ -113,7 +113,7 @@ Specify disk I/O timeout in seconds. Minimum 1, recommended 10 (default).
 
 <parameter name="check_interval" unique="0">
 <longdesc lang="en">
-Specify interval between I/O checks in seconds.
+Specify interval between I/O checks in seconds.(Only supported with the damonize option.)
 </longdesc>
 <shortdesc lang="en">I/O check interval</shortdesc>
 <content type="integer" default="${OCF_RESKEY_check_interval_default}" />
@@ -127,12 +127,12 @@ Used only for testing! Specify % of I/O errors to simulate drives failures.
 <content type="integer" default="${OCF_RESKEY_inject_errors_default}" />
 </parameter>
 
-<parameter name="options">
+<parameter name="daemonize" unique="0">
 <longdesc lang="en">
-Extra options to apply when starting storage-mon.
+Specifies to start storage-mon as a daemon and check for devices.
 </longdesc>
-<shortdesc lang="en">storage-mon start options</shortdesc>
-<content type="string" />
+<shortdesc lang="en">start storage-mon with daemon</shortdesc>
+<content type="string" default="" />
 </parameter>
 
 </parameters>
@@ -207,7 +207,7 @@ storage-mon_init() {
 storage-mon_validate() {
 	storage-mon_init
 
-        if [ -z "$OCF_RESKEY_options" ]; then
+        if [ -z "$OCF_RESKEY_daemonize" ]; then
 		# Is the state directory writable?
 		state_dir=$(dirname "$OCF_RESKEY_state_file")
 		touch "$state_dir/$$"
@@ -221,7 +221,7 @@ storage-mon_validate() {
 }
 
 storage-mon_monitor() {
-        if [ -z "$OCF_RESKEY_options" ]; then
+        if [ -z "$OCF_RESKEY_daemonize" ]; then
 		storage-mon_init
 
 		# Monitor _MUST!_ differentiate correctly between running
@@ -262,7 +262,7 @@ storage-mon_monitor() {
 }
 
 storage-mon_start() {
-        if [ -z "$OCF_RESKEY_options" ]; then
+        if [ -z "$OCF_RESKEY_daemonize" ]; then
 		storage-mon_monitor
 		if [ $? -eq $OCF_SUCCESS ]; then
 			return $OCF_SUCCESS
@@ -275,7 +275,7 @@ storage-mon_start() {
 		for DRIVE in ${OCF_RESKEY_drives}; do
 			cmdline="$cmdline --device $DRIVE --score 1"
 		done
-		cmdline="$cmdline --timeout ${OCF_RESKEY_io_timeout} --interval ${OCF_RESKEY_check_interval} --pidfile ${PIDFILE} --attrname ${ATTRNAME} --ha-sbin-dir ${HA_SBIN_DIR}"
+		cmdline="$cmdline --daemonize --timeout ${OCF_RESKEY_io_timeout} --interval ${OCF_RESKEY_check_interval} --pidfile ${PIDFILE} --attrname ${ATTRNAME} --ha-sbin-dir ${HA_SBIN_DIR}"
 		if [ -n "${OCF_RESKEY_inject_errors}" ]; then
 			cmdline="$cmdline --inject-errors-percent ${OCF_RESKEY_inject_errors}"
 		fi
@@ -290,7 +290,7 @@ storage-mon_stop() {
 	storage-mon_monitor
 	rc=$?
 
-        if [ -z "$OCF_RESKEY_options" ]; then
+        if [ -z "$OCF_RESKEY_daemonize" ]; then
 		if [ $rc -eq $OCF_SUCCESS ]; then
 			rm "${OCF_RESKEY_state_file}"
 		fi
@@ -329,7 +329,7 @@ storage-mon_stop() {
 storage-mon_validate() {
 	storage-mon_init
 
-        if [ -z "$OCF_RESKEY_options" ]; then
+        if [ -z "$OCF_RESKEY_daemonize" ]; then
 		# Is the state directory writable?
 		state_dir=$(dirname "${OCF_RESKEY_state_file}")
 		touch "$state_dir/$$"
