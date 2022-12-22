@@ -221,7 +221,7 @@ storage-mon_validate() {
 }
 
 storage-mon_monitor() {
-        if [ -z "$OCF_RESKEY_daemonize" ]; then
+	if [ -z "$OCF_RESKEY_daemonize" ]; then
 		storage-mon_init
 
 		# Monitor _MUST!_ differentiate correctly between running
