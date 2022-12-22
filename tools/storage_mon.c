@@ -176,6 +176,7 @@ static void child_shutdown(int nsig)
 {
 	exit(1);
 }
+
 static gboolean timer_cb(gpointer data)
 {
 	pid_t test_forks[MAX_DEVICES];
