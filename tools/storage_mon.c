@@ -16,17 +16,43 @@
 #ifdef __FreeBSD__
 #include <sys/disk.h>
 #endif
+#include <config.h>
+#include <glib.h>
+#include <libgen.h>
 
 #define MAX_DEVICES 25
 #define DEFAULT_TIMEOUT 10
+#define DEFAULT_INTERVAL 30
+#define DEFAULT_PIDFILE HA_VARRUNDIR "storage_mon.pid"
+#define DEFAULT_ATTRNAME "#health-storage_mon"
+
+#define DEFAULT_HA_SBIN_DIR "/usr/sbin"
+
+char *devices[MAX_DEVICES];
+size_t device_count;
+int scores[MAX_DEVICES];
+int timeout = DEFAULT_TIMEOUT;
+const char *attrname = DEFAULT_ATTRNAME;
+const char *ha_sbin_dir = DEFAULT_HA_SBIN_DIR;
+int verbose;
+int inject_error_percent;
+
+GMainLoop *mainloop;
+guint timer;
+int shutting_down = FALSE;
 
 static void usage(char *name, FILE *f)
 {
-	fprintf(f, "usage: %s [-hv] [-d <device>]... [-s <score>]... [-t <secs>]\n", name);
+	fprintf(f, "usage: %s [-hv] [-d <device>]... [-s <score>]... [-t <secs>][-i <secs>] [-p <pidfile>] [-a <attrname>]\n", name);
 	fprintf(f, "      --device <dev>  device to test, up to %d instances\n", MAX_DEVICES);
 	fprintf(f, "      --score  <n>    score if device fails the test. Must match --device count\n");
 	fprintf(f, "      --timeout <n>   max time to wait for a device test to come back. in seconds (default %d)\n", DEFAULT_TIMEOUT);
 	fprintf(f, "      --inject-errors-percent <n> Generate EIO errors <n>%% of the time (for testing only)\n");
+	fprintf(f, "      --ha-sbin-dir <dir> directory where attrd_updater is located (default %s)(for daemonize only)\n", DEFAULT_HA_SBIN_DIR);
+	fprintf(f, "      --daemonize      test run in daemons.\n");      
+	fprintf(f, "      --interval <n>       interval to test. in seconds (default %d)(for daemonize only)\n", DEFAULT_INTERVAL);
+	fprintf(f, "      --pidfile <path>     file path to record pid (default %s)(for daemonize only)\n", DEFAULT_PIDFILE);
+	fprintf(f, "      --attrname <attr>    attribute name to update test result (default %s)(for daemonize only)\n", DEFAULT_ATTRNAME);
 	fprintf(f, "      --verbose        emit extra output to stdout\n");
 	fprintf(f, "      --help           print this message\n");
 }
@@ -146,6 +172,198 @@ error:
 	exit(-1);
 }
 
+static void child_shutdown(int nsig)
+{
+	exit(1);
+}
+static gboolean timer_cb(gpointer data)
+{
+	pid_t test_forks[MAX_DEVICES];
+	size_t finished_count = 0;
+	struct timespec ts;
+	time_t start_time;
+	size_t i;
+	int final_score = 0;
+	const char *value;
+	pid_t pid, wpid;
+	int wstatus;
+
+	if (shutting_down == TRUE) {
+		goto done;
+	}
+
+	memset(test_forks, 0, sizeof(test_forks));
+	for (i=0; i< device_count; i++) {
+		test_forks[i] = fork();
+		if (test_forks[i] < 0) {
+			syslog(LOG_ERR, "Error spawning fork for %s: %s", devices[i], strerror(errno));
+			/* Just test the devices we have */
+			break;
+		}
+		/* child */
+		if (test_forks[i] == 0) {
+			signal(SIGTERM, &child_shutdown);
+			test_device(devices[i], verbose, inject_error_percent);
+		}
+	}
+
+	/* See if they have finished */
+	clock_gettime(CLOCK_REALTIME, &ts);
+	start_time = ts.tv_sec;
+
+	while ((finished_count < device_count) && ((start_time + timeout) > ts.tv_sec)) {
+		for (i=0; i<device_count; i++) {
+			if (test_forks[i] > 0) {
+				wpid = waitpid(test_forks[i], &wstatus, WUNTRACED | WNOHANG | WCONTINUED);
+				if (wpid < 0) {
+					syslog(LOG_ERR, "waitpid on %s failed: %s", devices[i], strerror(errno));
+					goto done;
+				}
+
+				if (wpid == test_forks[i]) {
+					if (WIFEXITED(wstatus)) {
+						if (WEXITSTATUS(wstatus) != 0) {
+							syslog(LOG_ERR, "I/O error detected on %s", devices[i]);
+							final_score += scores[i];
+						}
+
+						finished_count++;
+						test_forks[i] = 0;
+					}
+				}
+			}
+		}
+
+		usleep(100000);
+
+		clock_gettime(CLOCK_REALTIME, &ts);
+	}
+
+	/* See which threads have not finished */
+	for (i=0; i<device_count; i++) {
+		if (test_forks[i] != 0) {
+			syslog(LOG_ERR, "I/O error detected on %s (check did not complete within %ds)", devices[i], timeout);
+			final_score += scores[i];
+		}
+	}
+
+	/* Update node health attribute */
+	value = (final_score > 0) ? "red" : "green";
+	pid = fork();
+	if (pid == 0) {
+		char path[PATH_MAX];
+		snprintf(path, PATH_MAX, "%s/attrd_updater", ha_sbin_dir);
+		execl(path, "attrd_updater", "-n", attrname, "-U", value, "-d", "5s", NULL);
+		syslog(LOG_ERR, "Failed to execute %s: %s", path, strerror(errno));
+		exit(1);
+	} else if (pid < 0) {
+		syslog(LOG_ERR, "Error spawning fork for attrd_updater: %s", strerror(errno));
+		goto done;
+	}
+	wpid = waitpid(pid, &wstatus, 0);
+	if (wpid < 0) {
+		syslog(LOG_ERR, "failed to wait for attrd_updater: %s", strerror(errno));
+		goto done;
+	}
+	if (WIFEXITED(wstatus) && (WEXITSTATUS(wstatus) != 0)) {
+		syslog(LOG_ERR, "failed to update attribute (%s=%s): attrd_updater exited %d", attrname, value, WEXITSTATUS(wstatus));
+		goto done;
+	}
+	if (verbose) {
+		syslog(LOG_INFO, "Updated node health attribute: %s=%s", attrname, value);
+	}
+
+	/* See if threads have finished */
+	while (finished_count < device_count) {
+		for (i=0; i<device_count; i++) {
+			if (test_forks[i] > 0
+			    && waitpid(test_forks[i], &wstatus, WUNTRACED | WNOHANG | WCONTINUED) == test_forks[i]
+			    && WIFEXITED(wstatus)) {
+				finished_count++;
+				test_forks[i] = 0;
+			}
+		}
+		usleep(100000);
+	}
+
+	if (shutting_down == TRUE) {
+		goto done;
+	}
+	if (data != NULL) {
+		g_source_remove(timer);
+		timer = g_timeout_add(*(int *)data * 1000, timer_cb, NULL);
+	}
+	return TRUE;
+
+done:
+	g_main_loop_quit(mainloop);
+	return FALSE;
+}
+
+static int write_pid_file(const char *pidfile)
+{
+	char *pid;
+	char *dir, *str = NULL;
+	int fd = -1;
+	int rc = -1;
+	int i, len;
+
+	if (asprintf(&pid, "%jd", (intmax_t)getpid()) < 0) {
+		syslog(LOG_ERR, "Failed to allocate memory to store PID");
+		pid = NULL;
+		goto done;
+	}
+
+	str = strdup(pidfile);
+	if (str == NULL) {
+		syslog(LOG_ERR, "Failed to duplicate string ['%s']", pidfile);
+		goto done;
+	}
+	dir = dirname(str);
+	for (i = 1, len = strlen(dir); i < len; i++) {
+		if (dir[i] == '/') {
+			dir[i] = 0;
+			if ((mkdir(dir, 0640) < 0) && (errno != EEXIST)) {
+				syslog(LOG_ERR, "Failed to create directory %s: %s", dir, strerror(errno));
+				goto done;
+			}
+			dir[i] = '/';
+		}
+	}
+	if ((mkdir(dir, 0640) < 0) && (errno != EEXIST)) {
+		syslog(LOG_ERR, "Failed to create directory %s: %s", dir, strerror(errno));
+		goto done;
+	}
+
+	fd = open(pidfile, O_CREAT | O_WRONLY, 0640);
+	if (fd < 0) {
+		syslog(LOG_ERR, "Failed to open %s: %s", pidfile, strerror(errno));
+		goto done;
+	}
+
+	if (write(fd, pid, strlen(pid)) != strlen(pid)) {
+		syslog(LOG_ERR, "Failed to write '%s' to %s: %s", pid, pidfile, strerror(errno));
+		goto done;
+	}
+	close(fd);
+	rc = 0;
+done:
+	if (pid != NULL) {
+		free(pid);
+	}
+	if (str != NULL) {
+		free(str);
+	}
+	return rc;
+}
+
+static void daemon_shutdown(int nsig)
+{
+	shutting_down = TRUE;
+	g_source_remove(timer);
+	timer = g_timeout_add(0, timer_cb, NULL);
+}
+
 int main(int argc, char *argv[])
 {
 	char *devices[MAX_DEVICES];
@@ -154,19 +372,24 @@ int main(int argc, char *argv[])
 	size_t device_count = 0;
 	size_t score_count = 0;
 	size_t finished_count = 0;
-	int timeout = DEFAULT_TIMEOUT;
 	struct timespec ts;
 	time_t start_time;
 	size_t i;
 	int final_score = 0;
 	int opt, option_index;
-	int verbose = 0;
-	int inject_error_percent = 0;
+	int interval = DEFAULT_INTERVAL;
+	const char *pidfile = DEFAULT_PIDFILE;
+	gboolean daemonize = FALSE;
+
 	struct option long_options[] = {
 		{"timeout", required_argument, 0, 't' },
 		{"device",  required_argument, 0, 'd' },
 		{"score",   required_argument, 0, 's' },
 		{"inject-errors-percent",   required_argument, 0, 0 },
+		{"daemonize", required_argument, 0, 0 },
+		{"interval", required_argument, 0, 'i' },
+		{"pidfile", required_argument, 0, 'p' },
+		{"attrname", required_argument, 0, 'a' },
 		{"verbose", no_argument, 0, 'v' },
 		{"help",    no_argument, 0,       'h' },
 		{0,         0,           0,        0  }
@@ -182,6 +405,17 @@ int main(int argc, char *argv[])
 						return -1;
 					}
 				}
+				if (strcmp(long_options[option_index].name, "daemonize") == 0) {
+					daemonize = TRUE;
+				}
+				if (strcmp(long_options[option_index].name, "ha-sbin-dir") == 0) {
+					ha_sbin_dir = strdup(optarg);
+					if (ha_sbin_dir == NULL) {
+						fprintf(stderr, "Failed to duplicate string ['%s']\n", optarg);
+						return -1;
+					}
+				}
+
 				break;
 			case 'd':
 				if (device_count < MAX_DEVICES) {
@@ -218,6 +452,27 @@ int main(int argc, char *argv[])
 				usage(argv[0], stdout);
 				return 0;
 				break;
+			case 'i':
+				interval = atoi(optarg);
+				if (interval < 1) {
+					fprintf(stderr, "invalid interval %d. Min 1, default is %d\n", interval, DEFAULT_INTERVAL);
+					return -1;
+				}
+				break;
+			case 'p':
+				pidfile = strdup(optarg);
+				if (pidfile == NULL) {
+					fprintf(stderr, "Failed to duplicate string ['%s']\n", optarg);
+					return -1;
+				}
+				break;
+			case 'a':
+				attrname = strdup(optarg);
+				if (attrname == NULL) {
+					fprintf(stderr, "Failed to duplicate string ['%s']\n", optarg);
+					return -1;
+				}
+				break;
 			default:
 				usage(argv[0], stderr);
 				return -1;
@@ -237,67 +492,99 @@ int main(int argc, char *argv[])
 
 	openlog("storage_mon", 0, LOG_DAEMON);
 
-	memset(test_forks, 0, sizeof(test_forks));
-	for (i=0; i<device_count; i++) {
-		test_forks[i] = fork();
-		if (test_forks[i] < 0) {
-			fprintf(stderr, "Error spawning fork for %s: %s\n", devices[i], strerror(errno));
-			syslog(LOG_ERR, "Error spawning fork for %s: %s\n", devices[i], strerror(errno));
-			/* Just test the devices we have */
-			break;
-		}
-		/* child */
-		if (test_forks[i] == 0) {
-			test_device(devices[i], verbose, inject_error_percent);
-		}
-	}
-
-	/* See if they have finished */
-	clock_gettime(CLOCK_REALTIME, &ts);
-	start_time = ts.tv_sec;
-
-	while ((finished_count < device_count) && ((start_time + timeout) > ts.tv_sec)) {
+	if (!daemonize) {
+		memset(test_forks, 0, sizeof(test_forks));
 		for (i=0; i<device_count; i++) {
-			int wstatus;
-			pid_t w;
-
-			if (test_forks[i] > 0) {
-				w = waitpid(test_forks[i], &wstatus, WUNTRACED | WNOHANG | WCONTINUED);
-				if (w < 0) {
-					fprintf(stderr, "waitpid on %s failed: %s\n", devices[i], strerror(errno));
-					return -1;
-				}
-
-				if (w == test_forks[i]) {
-					if (WIFEXITED(wstatus)) {
-						if (WEXITSTATUS(wstatus) != 0) {
-							syslog(LOG_ERR, "Error reading from device %s", devices[i]);
-							final_score += scores[i];
-						}
-
-						finished_count++;
-						test_forks[i] = 0;
-					}
-				}
+			test_forks[i] = fork();
+			if (test_forks[i] < 0) {
+				fprintf(stderr, "Error spawning fork for %s: %s\n", devices[i], strerror(errno));
+				syslog(LOG_ERR, "Error spawning fork for %s: %s\n", devices[i], strerror(errno));
+				/* Just test the devices we have */
+				break;
+			}
+			/* child */
+			if (test_forks[i] == 0) {
+				test_device(devices[i], verbose, inject_error_percent);
 			}
 		}
 
-		usleep(100000);
-
+		/* See if they have finished */
 		clock_gettime(CLOCK_REALTIME, &ts);
-	}
+		start_time = ts.tv_sec;
 
-	/* See which threads have not finished */
-	for (i=0; i<device_count; i++) {
-		if (test_forks[i] != 0) {
-			syslog(LOG_ERR, "Reading from device %s did not complete in %d seconds timeout", devices[i], timeout);
-			fprintf(stderr, "Thread for device %s did not complete in time\n", devices[i]);
-			final_score += scores[i];
+		while ((finished_count < device_count) && ((start_time + timeout) > ts.tv_sec)) {
+			for (i=0; i<device_count; i++) {
+				int wstatus;
+				pid_t w;
+
+				if (test_forks[i] > 0) {
+					w = waitpid(test_forks[i], &wstatus, WUNTRACED | WNOHANG | WCONTINUED);
+					if (w < 0) {
+						fprintf(stderr, "waitpid on %s failed: %s\n", devices[i], strerror(errno));
+						return -1;
+					}
+
+					if (w == test_forks[i]) {
+						if (WIFEXITED(wstatus)) {
+							if (WEXITSTATUS(wstatus) != 0) {
+								syslog(LOG_ERR, "Error reading from device %s", devices[i]);
+								final_score += scores[i];
+							}
+
+							finished_count++;
+							test_forks[i] = 0;
+						}
+					}
+				}
+			}
+
+			usleep(100000);
+
+			clock_gettime(CLOCK_REALTIME, &ts);
 		}
-	}
 
-	if (verbose) {
-		printf("Final score is %d\n", final_score);
+		/* See which threads have not finished */
+		for (i=0; i<device_count; i++) {
+			if (test_forks[i] != 0) {
+				syslog(LOG_ERR, "Reading from device %s did not complete in %d seconds timeout", devices[i], timeout);
+				fprintf(stderr, "Thread for device %s did not complete in time\n", devices[i]);
+				final_score += scores[i];
+			}
+		}
+
+		if (verbose) {
+			printf("Final score is %d\n", final_score);
+		}
+		return final_score;
+	} else {
+		struct sigaction sa;
+
+		if (daemon(0, 0) < 0) {
+			syslog(LOG_ERR, "Failed to daemonize: %s", strerror(errno));
+			return -1;
+		}
+
+		umask(S_IWGRP | S_IWOTH | S_IROTH);
+
+		memset(&sa, 0, sizeof(struct sigaction));
+		sa.sa_handler = daemon_shutdown;
+		sa.sa_flags = SA_RESTART;
+		if ((sigemptyset(&sa.sa_mask) < 0) || (sigaction(SIGTERM, &sa, NULL) < 0)) {
+			syslog(LOG_ERR, "Failed to set handler for signal: %s", strerror(errno));
+			return -1;
+		}
+
+		if (write_pid_file(pidfile) < 0) {
+			return -1;
+		}
+
+		mainloop = g_main_loop_new(NULL, FALSE);
+		timer = g_timeout_add(0, timer_cb, &interval);
+		g_main_loop_run(mainloop);
+		g_main_loop_unref(mainloop);
+
+		unlink(pidfile);
+
+		return 0;
 	}
-	return final_score;
 }
