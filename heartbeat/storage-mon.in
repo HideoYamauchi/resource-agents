@@ -48,8 +48,8 @@
 . ${OCF_FUNCTIONS_DIR}/ocf-shellfuncs
 
 #
-STORAGEMON=$HA_BIN/storage_mon
-ATTRDUP=$HA_SBIN_DIR/attrd_updater
+STORAGEMON=${HA_BIN}/storage_mon
+ATTRDUP=${HA_SBIN_DIR}/attrd_updater
 PIDFILE=${HA_VARRUN}/storage-mon-${OCF_RESOURCE_INSTANCE}.pid
 ATTRNAME="#health-${OCF_RESOURCE_INSTANCE}"
 
