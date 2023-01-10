@@ -399,7 +399,7 @@ int main(int argc, char *argv[])
 		{"interval", required_argument, 0, 'i' },
 		{"pidfile", required_argument, 0, 'p' },
 		{"attrname", required_argument, 0, 'a' },
-                {"ha-sbin-dir", required_argument, 0, 0 },
+		{"ha-sbin-dir", required_argument, 0, 0 },
 		{"verbose", no_argument, 0, 'v' },
 		{"help",    no_argument, 0,       'h' },
 		{0,         0,           0,        0  }
