@@ -205,22 +205,6 @@ storage-mon_init() {
 	fi
 }
 
-storage-mon_validate() {
-	storage-mon_init
-
-	if [ -z "$OCF_RESKEY_daemonize" ]; then
-		# Is the state directory writable?
-		state_dir=$(dirname "$OCF_RESKEY_state_file")
-		touch "$state_dir/$$"
-		if [ $? -ne 0 ]; then
-			return $OCF_ERR_CONFIGURED
-		fi
-		rm "$state_dir/$$"
-	fi
-
-	return $OCF_SUCCESS
-}
-
 storage-mon_monitor() {
 	if [ -z "$OCF_RESKEY_daemonize" ]; then
 		storage-mon_init
