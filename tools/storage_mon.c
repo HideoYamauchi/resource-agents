@@ -28,15 +28,21 @@
 
 #define DEFAULT_HA_SBIN_DIR "/usr/sbin"
 
-#define PRINT_STORAGE_MON_ERR(...) if (!daemonize) { \
-					fprintf(stderr, __VA_ARGS__); \
+#define PRINT_STORAGE_MON_ERR(fmt, ...) if (!daemonize) { \
+					fprintf(stderr, fmt"\n", __VA_ARGS__); \
 				} else { \
-					syslog(LOG_ERR, __VA_ARGS__); \
+					syslog(LOG_ERR, fmt, __VA_ARGS__); \
 				}
-#define PRINT_STORAGE_MON_INFO(...) if (!daemonize) { \
-					printf(__VA_ARGS__); \
+#define PRINT_STORAGE_MON_ERR_NOARGS(str) if (!daemonize) { \
+					fprintf(stderr, str"\n"); \
 				} else { \
-					syslog(LOG_INFO, __VA_ARGS__); \
+					syslog(LOG_ERR, str); \
+				}
+
+#define PRINT_STORAGE_MON_INFO(fmt, ...) if (!daemonize) { \
+					printf(fmt"\n", __VA_ARGS__); \
+				} else { \
+					syslog(LOG_INFO, fmt, __VA_ARGS__); \
 				}
 
 char *devices[MAX_DEVICES];
@@ -87,13 +93,13 @@ static void *test_device(const char *device, int verbose, int inject_error_perce
 	device_fd = open(device, flags);
 	if (device_fd < 0) {
 		if (errno != EINVAL) {
-			PRINT_STORAGE_MON_ERR("Failed to open %s: %s\n", device, strerror(errno));
+			PRINT_STORAGE_MON_ERR("Failed to open %s: %s", device, strerror(errno));
 			exit(-1);
 		}
 		flags &= ~O_DIRECT;
 		device_fd = open(device, flags);
 		if (device_fd < 0) {
-			PRINT_STORAGE_MON_ERR("Failed to open %s: %s\n", device, strerror(errno));
+			PRINT_STORAGE_MON_ERR("Failed to open %s: %s", device, strerror(errno));
 			exit(-1);
 		}
 	}
@@ -103,11 +109,11 @@ static void *test_device(const char *device, int verbose, int inject_error_perce
 	res = ioctl(device_fd, BLKGETSIZE64, &devsize);
 #endif
 	if (res < 0) {
-		PRINT_STORAGE_MON_ERR("Failed to get device size for %s: %s\n", device, strerror(errno));
+		PRINT_STORAGE_MON_ERR("Failed to get device size for %s: %s", device, strerror(errno));
 		goto error;
 	}
 	if (verbose) {
-		PRINT_STORAGE_MON_INFO("%s: opened %s O_DIRECT, size=%zu\n", device, (flags & O_DIRECT)?"with":"without", devsize);
+		PRINT_STORAGE_MON_INFO("%s: opened %s O_DIRECT, size=%zu", device, (flags & O_DIRECT)?"with":"without", devsize);
 	}
 
 	/* Don't fret about real randomness */
@@ -116,11 +122,11 @@ static void *test_device(const char *device, int verbose, int inject_error_perce
 	seek_spot = (rand() % (devsize-1024)) & 0xFFFFFFFFFFFFFE00;
 	res = lseek(device_fd, seek_spot, SEEK_SET);
 	if (res < 0) {
-		PRINT_STORAGE_MON_ERR("Failed to seek %s: %s\n", device, strerror(errno));
+		PRINT_STORAGE_MON_ERR("Failed to seek %s: %s", device, strerror(errno));
 		goto error;
 	}
 	if (verbose) {
-		PRINT_STORAGE_MON_INFO("%s: reading from pos %ld\n", device, seek_spot);
+		PRINT_STORAGE_MON_INFO("%s: reading from pos %ld", device, seek_spot);
 	}
 
 	if (flags & O_DIRECT) {
@@ -133,22 +139,22 @@ static void *test_device(const char *device, int verbose, int inject_error_perce
 		res = ioctl(device_fd, BLKSSZGET, &sec_size);
 #endif
 		if (res < 0) {
-			PRINT_STORAGE_MON_ERR("Failed to get block device sector size for %s: %s\n", device, strerror(errno));
+			PRINT_STORAGE_MON_ERR("Failed to get block device sector size for %s: %s", device, strerror(errno));
 			goto error;
 		}
 
 		if (posix_memalign(&buffer, sysconf(_SC_PAGESIZE), sec_size) != 0) {
-			PRINT_STORAGE_MON_ERR("Failed to allocate aligned memory: %s\n", strerror(errno));
+			PRINT_STORAGE_MON_ERR("Failed to allocate aligned memory: %s", strerror(errno));
 			goto error;
 		}
 		res = read(device_fd, buffer, sec_size);
 		free(buffer);
 		if (res < 0) {
-			PRINT_STORAGE_MON_ERR("Failed to read %s: %s\n", device, strerror(errno));
+			PRINT_STORAGE_MON_ERR("Failed to read %s: %s", device, strerror(errno));
 			goto error;
 		}
 		if (res < sec_size) {
-			PRINT_STORAGE_MON_ERR("Failed to read %d bytes from %s, got %d\n", sec_size, device, res);
+			PRINT_STORAGE_MON_ERR("Failed to read %d bytes from %s, got %d", sec_size, device, res);
 			goto error;
 		}
 	} else {
@@ -156,28 +162,28 @@ static void *test_device(const char *device, int verbose, int inject_error_perce
 
 		res = read(device_fd, buffer, sizeof(buffer));
 		if (res < 0) {
-			PRINT_STORAGE_MON_ERR("Failed to read %s: %s\n", device, strerror(errno));
+			PRINT_STORAGE_MON_ERR("Failed to read %s: %s", device, strerror(errno));
 			goto error;
 		}
 		if (res < (int)sizeof(buffer)) {
-			PRINT_STORAGE_MON_ERR("Failed to read %ld bytes from %s, got %d\n", sizeof(buffer), device, res);
+			PRINT_STORAGE_MON_ERR("Failed to read %ld bytes from %s, got %d", sizeof(buffer), device, res);
 			goto error;
 		}
 	}
 
 	/* Fake an error */
 	if (inject_error_percent && ((rand() % 100) < inject_error_percent)) {
-		PRINT_STORAGE_MON_ERR("People, please fasten your seatbelts, injecting errors!\n");
+		PRINT_STORAGE_MON_ERR_NOARGS("People, please fasten your seatbelts, injecting errors!");
 		goto error;
 	}
 	res = close(device_fd);
 	if (res != 0) {
-		PRINT_STORAGE_MON_ERR("Failed to close %s: %s\n", device, strerror(errno));
+		PRINT_STORAGE_MON_ERR("Failed to close %s: %s", device, strerror(errno));
 		exit(-1);
 	}
 
 	if (verbose) {
-		PRINT_STORAGE_MON_INFO("%s: done\n", device);
+		PRINT_STORAGE_MON_INFO("%s: done", device);
 	}
 	exit(0);
 
@@ -299,7 +305,7 @@ static int test_device_main(gpointer data)
 			if (test_forks[i] > 0) {
 				w = waitpid(test_forks[i], &wstatus, WUNTRACED | WNOHANG | WCONTINUED);
 				if (w < 0) {
-					PRINT_STORAGE_MON_ERR("waitpid on %s failed: %s\n", devices[i], strerror(errno));
+					PRINT_STORAGE_MON_ERR("waitpid on %s failed: %s", devices[i], strerror(errno));
 					return -1;
 				}
 
