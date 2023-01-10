@@ -192,7 +192,7 @@ storage-mon_init() {
 		exit $OCF_ERR_CONFIGURED
 	fi
 
-        if [ "${OCF_RESKEY_check_interval}" -lt "1" ]; then
+	if [ "${OCF_RESKEY_check_interval}" -lt "1" ]; then
 		ocf_log err "Minimum interval to check is 1. default ${OCF_RESKEY_check_interval_default}."
 		exit $OCF_ERR_CONFIGURED
 	fi
@@ -208,7 +208,7 @@ storage-mon_init() {
 storage-mon_validate() {
 	storage-mon_init
 
-        if [ -z "$OCF_RESKEY_daemonize" ]; then
+	if [ -z "$OCF_RESKEY_daemonize" ]; then
 		# Is the state directory writable?
 		state_dir=$(dirname "$OCF_RESKEY_state_file")
 		touch "$state_dir/$$"
@@ -263,7 +263,7 @@ storage-mon_monitor() {
 }
 
 storage-mon_start() {
-        if [ -z "$OCF_RESKEY_daemonize" ]; then
+	if [ -z "$OCF_RESKEY_daemonize" ]; then
 		storage-mon_monitor
 		if [ $? -eq $OCF_SUCCESS ]; then
 			return $OCF_SUCCESS
@@ -291,7 +291,7 @@ storage-mon_stop() {
 	storage-mon_monitor
 	rc=$?
 
-        if [ -z "$OCF_RESKEY_daemonize" ]; then
+	if [ -z "$OCF_RESKEY_daemonize" ]; then
 		if [ $rc -eq $OCF_SUCCESS ]; then
 			rm "${OCF_RESKEY_state_file}"
 		fi
@@ -330,7 +330,7 @@ storage-mon_stop() {
 storage-mon_validate() {
 	storage-mon_init
 
-        if [ -z "$OCF_RESKEY_daemonize" ]; then
+	if [ -z "$OCF_RESKEY_daemonize" ]; then
 		# Is the state directory writable?
 		state_dir=$(dirname "${OCF_RESKEY_state_file}")
 		touch "$state_dir/$$"
