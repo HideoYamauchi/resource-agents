@@ -64,6 +64,7 @@ OCF_RESKEY_daemonize_default=""
 : ${OCF_RESKEY_CRM_meta_interval:=${OCF_RESKEY_CRM_meta_interval_default}}
 : ${OCF_RESKEY_drives:=""}
 : ${OCF_RESKEY_io_timeout:=${OCF_RESKEY_io_timeout_default}}
+: ${OCF_RESKEY_check_interval:=${OCF_RESKEY_check_interval_default}}
 : ${OCF_RESKEY_inject_errors:=${OCF_RESKEY_inject_errors_default}}
 : ${OCF_RESKEY_state_file:=${OCF_RESKEY_state_file_default}}
 : ${OCF_RESKEY_daemonize:=${OCF_RESKEY_daemonize_default}}
