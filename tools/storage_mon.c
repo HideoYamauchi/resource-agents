@@ -412,7 +412,7 @@ int main(int argc, char *argv[])
 		{"device",  required_argument, 0, 'd' },
 		{"score",   required_argument, 0, 's' },
 		{"inject-errors-percent",   required_argument, 0, 0 },
-		{"daemonize", required_argument, 0, 0 },
+		{"daemonize", no_argument, 0, 0 },
 		{"interval", required_argument, 0, 'i' },
 		{"pidfile", required_argument, 0, 'p' },
 		{"attrname", required_argument, 0, 'a' },
