@@ -271,10 +271,6 @@ storage-mon_start() {
 	fi
 }
 
-storage-mon_del_attr() {
-	"$ATTRDUP" -D -n ${ATTRNAME} -d "5s"
-}
-
 storage-mon_stop() {
 	storage-mon_monitor
 	rc=$?
@@ -288,16 +284,13 @@ storage-mon_stop() {
 			$OCF_SUCCESS)
 				;;
 			$OCF_NOT_RUNNING)
-				storage-mon_del_attr
 				return "$OCF_SUCCESS";;
 			*)
-				storage-mon_del_attr
 				return "$rc";;
 		esac
 
 		kill -TERM $(cat "${PIDFILE}")
 		if [ "$?" -ne 0 ]; then
-			storage-mon_del_attr
 			return $OCF_ERR_GENERIC
 		fi
 
@@ -308,10 +301,8 @@ storage-mon_stop() {
 				$OCF_SUCCESS)
 					;;
 				$OCF_NOT_RUNNING)
-					storage-mon_del_attr
 					return "$OCF_SUCCESS";;
 				*)
-					storage-mon_del_attr
 					return "$rc";;
 			esac
 			sleep 1
