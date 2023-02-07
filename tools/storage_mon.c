@@ -20,6 +20,12 @@
 #include <glib.h>
 #include <libgen.h>
 
+#include <qb/qbdefs.h>
+#include <qb/qblog.h>
+#include <qb/qbloop.h>
+#include <qb/qbutil.h>
+#include <qb/qbipcs.h>
+
 #define MAX_DEVICES 25
 #define DEFAULT_TIMEOUT 10
 #define DEFAULT_INTERVAL 30
@@ -45,6 +51,10 @@
 					syslog(LOG_INFO, fmt, __VA_ARGS__); \
 				}
 
+struct timer_data {
+	int interval;
+};
+
 char *devices[MAX_DEVICES];
 int scores[MAX_DEVICES];
 size_t device_count = 0;
@@ -59,7 +69,13 @@ GMainLoop *mainloop;
 guint timer;
 int shutting_down = FALSE;
 
+static qb_loop_t *storage_mon_poll_handle;
+static qb_loop_timer_handle timer_handle;
+static qb_loop_timer_handle shutdown_timer_handle;
+static struct timer_data timer_d;
+
 static int test_device_main(gpointer data);
+static void wrap_test_device_main(void *data);
 
 static void usage(char *name, FILE *f)
 {
@@ -192,12 +208,29 @@ error:
 	exit(-1);
 }
 
+static int32_t sig_exit_handler (int num, void *data)
+{
+	shutting_down = TRUE;
+syslog(LOG_INFO, "#### YAMAUCHI #### sig_exit_handler() in");
+	qb_loop_timer_del(storage_mon_poll_handle, timer_handle);
+
+	qb_loop_timer_add(storage_mon_poll_handle,
+			QB_LOOP_MED,
+			0,
+			NULL,
+			wrap_test_device_main,
+			&shutdown_timer_handle);
+syslog(LOG_INFO, "#### YAMAUCHI #### sig_exit_handler() out");
+	return 0;
+}
+#if 0
 static void daemon_shutdown(int nsig)
 {
 	shutting_down = TRUE;
 	g_source_remove(timer);
 	timer = g_timeout_add(0, test_device_main, NULL);
 }
+#endif
 
 static void child_shutdown(int nsig)
 {
@@ -261,6 +294,12 @@ done:
 	return rc;
 }
 
+static void wrap_test_device_main(void *data)
+{
+	struct timer_data *timer_data = (struct timer_data*)data;
+	test_device_main((timer_data != NULL) ? &timer_data->interval : NULL);
+
+}
 static int test_device_main(gpointer data)
 {
 	pid_t test_forks[MAX_DEVICES];
@@ -347,6 +386,7 @@ static int test_device_main(gpointer data)
 		int wstatus;
 		/* Update node health attribute */
 		value = (final_score > 0) ? "red" : "green";
+syslog(LOG_INFO, "#### YAMAUCHI #### %s", value);
 		pid = fork();
 		if (pid == 0) {
 			char path[PATH_MAX];
@@ -388,15 +428,30 @@ static int test_device_main(gpointer data)
 			goto done;
 		}
 		if (data != NULL) {
+#if 0
 			g_source_remove(timer);
 			timer = g_timeout_add(*(int *)data * 1000, test_device_main, NULL);
+#endif
+syslog(LOG_INFO, "#### YAMAUCHI #### %lld", *(int *)data * QB_TIME_NS_IN_SEC);
+			qb_loop_timer_del(storage_mon_poll_handle, timer_handle);
+			qb_loop_timer_add(storage_mon_poll_handle,
+				QB_LOOP_MED,
+				*(int *)data * QB_TIME_NS_IN_SEC,
+				&timer_d,
+				wrap_test_device_main,
+				&timer_handle);
 		}
 		return TRUE;
 	}
 
 
 done:
+#if 0
 	g_main_loop_quit(mainloop);
+#endif
+syslog(LOG_INFO, "### YAMAUCHI #### stop prev");
+	qb_loop_stop(storage_mon_poll_handle);
+syslog(LOG_INFO, "### YAMAUCHI #### stop aft");
 	return FALSE;
 }
 
@@ -522,7 +577,9 @@ int main(int argc, char *argv[])
 	if (!daemonize) {
 		final_score = test_device_main(NULL);
 	} else {
+#if 0
 		struct sigaction sa;
+#endif
 
 		if (daemon(0, 0) < 0) {
 			syslog(LOG_ERR, "Failed to daemonize: %s", strerror(errno));
@@ -530,7 +587,7 @@ int main(int argc, char *argv[])
 		}
 
 		umask(S_IWGRP | S_IWOTH | S_IROTH);
-
+#if 0
 		memset(&sa, 0, sizeof(struct sigaction));
 		sa.sa_handler = daemon_shutdown;
 		sa.sa_flags = SA_RESTART;
@@ -538,15 +595,33 @@ int main(int argc, char *argv[])
 			syslog(LOG_ERR, "Failed to set handler for signal: %s", strerror(errno));
 			return -1;
 		}
+#endif
 
 		if (write_pid_file(pidfile) < 0) {
 			return -1;
 		}
 
+#if 0
 		mainloop = g_main_loop_new(NULL, FALSE);
 		timer = g_timeout_add(0, test_device_main, &interval);
 		g_main_loop_run(mainloop);
 		g_main_loop_unref(mainloop);
+#endif
+		storage_mon_poll_handle = qb_loop_create();
+
+		qb_loop_signal_add(storage_mon_poll_handle, QB_LOOP_HIGH,
+			SIGTERM, NULL, sig_exit_handler, NULL);
+
+
+		timer_d.interval = interval;
+		qb_loop_timer_add(storage_mon_poll_handle,
+			QB_LOOP_MED,
+			0,
+			&timer_d,
+			wrap_test_device_main,
+			&timer_handle);
+		qb_loop_run(storage_mon_poll_handle);
+		qb_loop_destroy(storage_mon_poll_handle);
 
 		unlink(pidfile);
 
