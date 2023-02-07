@@ -64,9 +64,10 @@ int inject_error_percent = 0;
 const char *attrname = DEFAULT_ATTRNAME;
 const char *ha_sbin_dir = DEFAULT_HA_SBIN_DIR;
 gboolean daemonize = FALSE;
-
+#if 0
 GMainLoop *mainloop;
 guint timer;
+#endif
 int shutting_down = FALSE;
 
 static qb_loop_t *storage_mon_poll_handle;
