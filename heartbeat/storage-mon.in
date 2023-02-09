@@ -260,7 +260,8 @@ storage-mon_start() {
 		for DRIVE in ${OCF_RESKEY_drives}; do
 			cmdline="$cmdline --device $DRIVE --score 1"
 		done
-		cmdline="$cmdline --daemonize --timeout ${OCF_RESKEY_io_timeout} --interval ${OCF_RESKEY_check_interval} --pidfile ${PIDFILE} --attrname ${ATTRNAME} --ha-sbin-dir ${HA_SBIN_DIR}"
+		#cmdline="$cmdline --daemonize --timeout ${OCF_RESKEY_io_timeout} --interval ${OCF_RESKEY_check_interval} --pidfile ${PIDFILE} --attrname ${ATTRNAME} --ha-sbin-dir ${HA_SBIN_DIR}"
+		cmdline="$cmdline --daemonize --timeout ${OCF_RESKEY_io_timeout} --interval ${OCF_RESKEY_check_interval} --pidfile ${PIDFILE} --attrname ${ATTRNAME}"
 		if [ -n "${OCF_RESKEY_inject_errors}" ]; then
 			cmdline="$cmdline --inject-errors-percent ${OCF_RESKEY_inject_errors}"
 		fi
