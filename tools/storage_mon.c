@@ -25,6 +25,7 @@
 #include <qb/qbloop.h>
 #include <qb/qbutil.h>
 #include <qb/qbipcs.h>
+#include <qb/qbipcc.h>
 
 #define MAX_DEVICES 25
 #define MAX_IPCSNAME 256
@@ -64,6 +65,13 @@ struct storage_mon_check_value_req {
 	char message[256];
 };
 
+
+struct storage_mon_check_value_res {
+        struct qb_ipc_response_header hdr;
+        char message[256];
+};
+
+
 char *devices[MAX_DEVICES];
 int scores[MAX_DEVICES];
 size_t device_count = 0;
@@ -75,6 +83,7 @@ const char *attrname = DEFAULT_ATTRNAME;
 const char *ha_sbin_dir = DEFAULT_HA_SBIN_DIR;
 #endif
 gboolean daemonize = FALSE;
+gboolean client = FALSE;
 #if 0
 GMainLoop *mainloop;
 guint timer;
@@ -85,7 +94,6 @@ static int32_t use_events = QB_FALSE;
 #endif
 static qb_ipcs_service_t *ipcs;
 const char *check_value = "";
-
 
 static qb_loop_t *storage_mon_poll_handle;
 static qb_loop_timer_handle timer_handle;
@@ -103,9 +111,10 @@ static void usage(char *name, FILE *f)
 	fprintf(f, "      --timeout <n>   max time to wait for a device test to come back. in seconds (default %d)\n", DEFAULT_TIMEOUT);
 	fprintf(f, "      --inject-errors-percent <n> Generate EIO errors <n>%% of the time (for testing only)\n");
 	fprintf(f, "      --daemonize      test run in daemons.\n");      
+	fprintf(f, "      --client      client connection to daemon.\n");      
 	fprintf(f, "      --interval <n>       interval to test. in seconds (default %d)(for daemonize only)\n", DEFAULT_INTERVAL);
 	fprintf(f, "      --pidfile <path>     file path to record pid (default %s)(for daemonize only)\n", DEFAULT_PIDFILE);
-	fprintf(f, "      --attrname <attr>    attribute name to update test result (default %s)(for daemonize only)\n", DEFAULT_ATTRNAME);
+	fprintf(f, "      --attrname <attr>    attribute name to update test result (default %s)(for daemonize/client only)\n", DEFAULT_ATTRNAME);
 #if 0
 	fprintf(f, "      --ha-sbin-dir <dir> directory where attrd_updater is located (default %s)(for daemonize only)\n", DEFAULT_HA_SBIN_DIR);
 #endif
@@ -565,10 +574,11 @@ ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size)
 	req_pt = (struct storage_mon_check_value_req *)data;
 	syslog(LOG_DEBUG, "msg received (id:%d, size:%d, data:%s)",
 		req_pt->hdr.id, req_pt->hdr.size, req_pt->message);
-
+#if 0
 	if (strcmp(req_pt->message, "kill") == 0) {
 		return 0;
 	}
+#endif
 	resps.size = sizeof(struct qb_ipc_response_header);
 	resps.id = 13;
 	resps.error = 0;
@@ -622,6 +632,7 @@ int main(int argc, char *argv[])
 		{"score",   required_argument, 0, 's' },
 		{"inject-errors-percent",   required_argument, 0, 0 },
 		{"daemonize", no_argument, 0, 0 },
+		{"client", no_argument, 0, 0 },
 		{"interval", required_argument, 0, 'i' },
 		{"pidfile", required_argument, 0, 'p' },
 		{"attrname", required_argument, 0, 'a' },
@@ -646,6 +657,13 @@ int main(int argc, char *argv[])
 				}
 				if (strcmp(long_options[option_index].name, "daemonize") == 0) {
 					daemonize = TRUE;
+				}
+				if (strcmp(long_options[option_index].name, "client") == 0) {
+					client = TRUE;
+				}
+				if (daemonize && client) {
+					fprintf(stderr,"The daemonize option and client option cannot be specified at the same time.");	
+					return -1;
 				}
 #if 0
 				if (strcmp(long_options[option_index].name, "ha-sbin-dir") == 0) {
@@ -720,6 +738,49 @@ int main(int argc, char *argv[])
 		}
 
 	}
+
+	if (client) {
+		struct storage_mon_check_value_req req;
+		struct storage_mon_check_value_res res;
+		qb_ipcc_connection_t *conn;
+		char ipcs_name[MAX_IPCSNAME];
+		int32_t rc;
+
+
+		sprintf(ipcs_name, "storage_mon_%s", attrname);
+		conn = qb_ipcc_connect(ipcs_name, 0);
+		if (conn == NULL) {
+			fprintf(stderr, "qb_ipcc_connect error");
+			return(-1);
+		}
+
+		sprintf(req.message, "%s", "get_check_value");
+		req.hdr.id = QB_IPC_MSG_USER_START + 3;
+		req.hdr.size = sizeof(struct storage_mon_check_value_req);
+		rc = qb_ipcc_send(conn, &req, req.hdr.size);
+		if (rc < 0) {
+			fprintf(stderr, "qb_ipcc_send error");
+			return(-1);
+		}
+		if (rc > 0) {
+			rc = qb_ipcc_recv(conn, &res, sizeof(res), -1);
+                        if (rc < 0) {
+                                fprintf(stderr, "qb_ipcc_recv error");
+                                return(-1);
+                        }
+		}
+
+		qb_ipcc_disconnect(conn);
+
+		if (strcmp(res.message, "green") == 0) {
+			rc = 0;
+		} else {
+			rc = 1;
+		}
+		syslog(LOG_DEBUG, "daemon response[%d]: %s \n", res.hdr.id, res.message);
+		return(rc);
+	}
+
 	if (device_count == 0) {
 		fprintf(stderr, "No devices to test, use the -d  or --device argument\n");
 		return -1;
