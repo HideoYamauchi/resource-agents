@@ -28,12 +28,13 @@
 #include <qb/qbipcc.h>
 
 #define MAX_DEVICES 25
-#define MAX_IPCSNAME 256
 #define DEFAULT_TIMEOUT 10
 #define DEFAULT_INTERVAL 30
 #define DEFAULT_PIDFILE HA_VARRUNDIR "storage_mon.pid"
 #define DEFAULT_ATTRNAME "#health-storage_mon"
 #define BUFF_1MEG 1048576
+#define MAX_IPCSNAME 256
+#define MAX_MSGSIZE 128
 
 #define PRINT_STORAGE_MON_ERR(fmt, ...) if (!daemonize) { \
 					fprintf(stderr, fmt"\n", __VA_ARGS__); \
@@ -58,13 +59,13 @@ struct storage_mon_timer_data {
 
 struct storage_mon_check_value_req {
 	struct qb_ipc_request_header hdr;
-	char message[256];
+	char message[MAX_MSGSIZE];
 };
 
 
 struct storage_mon_check_value_res {
         struct qb_ipc_response_header hdr;
-        char message[256];
+        char message[MAX_MSGSIZE];
 };
 
 
@@ -645,14 +646,14 @@ int main(int argc, char *argv[])
 		int32_t rc;
 
 
-		sprintf(ipcs_name, "storage_mon_%s", attrname);
+		snprintf(ipcs_name, MAX_IPCSNAME, "storage_mon_%s", attrname);
 		conn = qb_ipcc_connect(ipcs_name, 0);
 		if (conn == NULL) {
 			fprintf(stderr, "qb_ipcc_connect error");
 			return(-1);
 		}
 
-		sprintf(req.message, "%s", "get_check_value");
+		snprintf(req.message, MAX_MSGSIZE, "%s", "get_check_value");
 		req.hdr.id = QB_IPC_MSG_USER_START + 3;
 		req.hdr.size = sizeof(struct storage_mon_check_value_req);
 		rc = qb_ipcc_send(conn, &req, req.hdr.size);
@@ -724,7 +725,7 @@ int main(int argc, char *argv[])
 			return -1;
 		}
 
-		sprintf(ipcs_name, "storage_mon_%s", attrname);
+		snprintf(ipcs_name, MAX_IPCSNAME, "storage_mon_%s", attrname);
 		ipcs = qb_ipcs_create(ipcs_name, 0, ipc_type, &sh);
 		syslog(LOG_INFO, "#### YAMAUCHI ### ipcs_name : %s", ipcs_name);
 		if (ipcs == 0) {
