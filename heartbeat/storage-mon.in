@@ -246,16 +246,34 @@ storage-mon_monitor() {
 		if [ $rc -ne $OCF_SUCCESS ]; then
 			return "$rc"
 		fi
+		if [ "$1" = "pid_check_only" ]; then
+			return "$rc"
+		fi
 
 		# generate client command line
 		cmdline=""
 		cmdline="$cmdline --client --attrname ${ATTRNAME}"
-		$STORAGEMON $cmdline
-		if [ $? -ne 0 ]; then
-			status="red"
-		else
-			status="green"
-		fi
+		while :
+		do
+			$STORAGEMON $cmdline
+			case $? in
+				0)
+					status="green"
+					break
+					;;
+				1)
+					status="red"
+					break
+					;;
+				*)
+					;;
+			esac
+		done
+#		if [ $? -ne 0 ]; then
+#			status="red"
+#		else
+#			status="green"
+#		fi
 
 		"$ATTRDUP" -n ${ATTRNAME} -U "$status" -d "5s"
 		return $OCF_SUCCESS
@@ -289,7 +307,7 @@ storage-mon_start() {
 }
 
 storage-mon_stop() {
-	storage-mon_monitor
+	storage-mon_monitor pid_check_only
 	rc=$?
 
 	if [ -z "$OCF_RESKEY_daemonize" ]; then
@@ -312,7 +330,7 @@ storage-mon_stop() {
 		fi
 
 		while true; do
-			storage-mon_monitor
+			storage-mon_monitor pid_check_only
 			rc="$?"
 			case "$rc" in
 				$OCF_SUCCESS)
