@@ -492,7 +492,7 @@ static int32_t
 storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size)
 {
 	struct qb_ipc_request_header *hdr;
-	struct storage_mon_check_value_req *req_pt;
+	struct storage_mon_check_value_req *request;
 	struct qb_ipc_response_header resps;
 	ssize_t res;
 	struct iovec iov[2];
@@ -504,9 +504,9 @@ storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size
 		return 0;
 	}
 
-	req_pt = (struct storage_mon_check_value_req *)data;
+	request = (struct storage_mon_check_value_req *)data;
 	syslog(LOG_DEBUG, "msg received (id:%d, size:%d, data:%s)",
-		req_pt->hdr.id, req_pt->hdr.size, req_pt->message);
+		request->hdr.id, request->hdr.size, request->message);
 
 	resps.size = sizeof(struct qb_ipc_response_header);
 	resps.id = 13;
@@ -530,8 +530,8 @@ storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size
 static int32_t
 storage_mon_client(void)
 {
-	struct storage_mon_check_value_req req;
-	struct storage_mon_check_value_res res;
+	struct storage_mon_check_value_req request;
+	struct storage_mon_check_value_res response;
 	qb_ipcc_connection_t *conn;
 	char ipcs_name[MAX_IPCSNAME];
 	int32_t rc;
@@ -544,16 +544,16 @@ storage_mon_client(void)
 		return(-1);
 	}
 
-	snprintf(req.message, MAX_MSGSIZE, "%s", CLIENT_COMMAND);
-	req.hdr.id = QB_IPC_MSG_USER_START + 3;
-	req.hdr.size = sizeof(struct storage_mon_check_value_req);
-	rc = qb_ipcc_send(conn, &req, req.hdr.size);
+	snprintf(request.message, MAX_MSGSIZE, "%s", CLIENT_COMMAND);
+	request.hdr.id = QB_IPC_MSG_USER_START + 3;
+	request.hdr.size = sizeof(struct storage_mon_check_value_req);
+	rc = qb_ipcc_send(conn, &request, request.hdr.size);
 	if (rc < 0) {
 		fprintf(stderr, "qb_ipcc_send error : %d", rc);
 		return(-1);
 	}
 	if (rc > 0) {
-		rc = qb_ipcc_recv(conn, &res, sizeof(res), -1);
+		rc = qb_ipcc_recv(conn, &response, sizeof(response), -1);
 		if (rc < 0) {
 			fprintf(stderr, "qb_ipcc_recv error : %d", rc);
 			return(-1);
@@ -562,13 +562,13 @@ storage_mon_client(void)
 
 	qb_ipcc_disconnect(conn);
 
-	if (strcmp(res.message, "green") == 0) {
+	if (strcmp(response.message, "green") == 0) {
 		rc = 0; /* green */
 	} else {
 		rc = 1;	/* red */
 	}
 
-	syslog(LOG_DEBUG, "daemon response[%d]: %s \n", res.hdr.id, res.message);
+	syslog(LOG_DEBUG, "daemon response[%d]: %s \n", response.hdr.id, response.message);
 	return(rc);
 }
 
@@ -577,7 +577,6 @@ storage_mon_daemon(int interval, const char *pidfile)
 {
 	int32_t rc;
 	char ipcs_name[MAX_IPCSNAME];
-	enum qb_ipc_type ipc_type = QB_IPC_NATIVE;
 
 	struct qb_ipcs_service_handlers sh = {
 		.connection_accept = storage_mon_ipcs_connection_accept_fn,
@@ -606,7 +605,7 @@ storage_mon_daemon(int interval, const char *pidfile)
 	}
 
 	snprintf(ipcs_name, MAX_IPCSNAME, "storage_mon_%s", attrname);
-	ipcs = qb_ipcs_create(ipcs_name, 0, ipc_type, &sh);
+	ipcs = qb_ipcs_create(ipcs_name, 0, QB_IPC_NATIVE, &sh);
 	if (ipcs == 0) {
 		syslog(LOG_ERR, "qb_ipcs_create");
 		return -1;
