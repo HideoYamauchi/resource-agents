@@ -98,7 +98,7 @@ static void usage(char *name, FILE *f)
 	fprintf(f, "      --timeout <n>   max time to wait for a device test to come back. in seconds (default %d)\n", DEFAULT_TIMEOUT);
 	fprintf(f, "      --inject-errors-percent <n> Generate EIO errors <n>%% of the time (for testing only)\n");
 	fprintf(f, "      --daemonize      test run in daemons.\n");      
-	fprintf(f, "      --client      client connection to daemon.\n");      
+	fprintf(f, "      --client      client connection to daemon. requires the attrname option.\n");
 	fprintf(f, "      --interval <n>       interval to test. in seconds (default %d)(for daemonize only)\n", DEFAULT_INTERVAL);
 	fprintf(f, "      --pidfile <path>     file path to record pid (default %s)(for daemonize only)\n", DEFAULT_PIDFILE);
 	fprintf(f, "      --attrname <attr>    attribute name to update test result (default %s)(for daemonize/client only)\n", DEFAULT_ATTRNAME);
