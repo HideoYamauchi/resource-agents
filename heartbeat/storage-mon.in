@@ -266,14 +266,10 @@ storage-mon_monitor() {
 					break
 					;;
 				*)
+					ocf_log debug "client monitor error : $rc"
 					;;
 			esac
 		done
-#		if [ $? -ne 0 ]; then
-#			status="red"
-#		else
-#			status="green"
-#		fi
 
 		"$ATTRDUP" -n ${ATTRNAME} -U "$status" -d "5s"
 		return $OCF_SUCCESS
