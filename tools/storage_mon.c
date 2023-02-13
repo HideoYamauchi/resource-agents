@@ -32,6 +32,7 @@
 #define DEFAULT_INTERVAL 30
 #define DEFAULT_PIDFILE HA_VARRUNDIR "storage_mon.pid"
 #define DEFAULT_ATTRNAME "#health-storage_mon"
+#define CLIENT_COMMAND "get_check_value"
 #define BUFF_1MEG 1048576
 #define MAX_IPCSNAME 256
 #define MAX_MSGSIZE 128
@@ -77,7 +78,6 @@ int verbose = 0;
 int inject_error_percent = 0;
 const char *attrname = DEFAULT_ATTRNAME;
 gboolean daemonize = FALSE;
-gboolean client = FALSE;
 int shutting_down = FALSE;
 static qb_ipcs_service_t *ipcs;
 const char *check_value = "";
@@ -224,7 +224,7 @@ error:
 static int32_t sig_exit_handler (int num, void *data)
 {
 	shutting_down = TRUE;
-syslog(LOG_INFO, "#### YAMAUCHI #### sig_exit_handler() in");
+
 	qb_loop_timer_del(storage_mon_poll_handle, timer_handle);
 
 	qb_loop_timer_add(storage_mon_poll_handle,
@@ -233,7 +233,6 @@ syslog(LOG_INFO, "#### YAMAUCHI #### sig_exit_handler() in");
 			NULL,
 			wrap_test_device_main,
 			&shutdown_timer_handle);
-syslog(LOG_INFO, "#### YAMAUCHI #### sig_exit_handler() out");
 	return 0;
 }
 
@@ -389,7 +388,7 @@ static int test_device_main(gpointer data)
 		int wstatus;
 		/* Update node health attribute */
 		check_value = (final_score > 0) ? "red" : "green";
-syslog(LOG_INFO, "#### YAMAUCHI #### %s", check_value);
+
 		/* See if threads have finished */
 		while (finished_count < device_count) {
 			for (i=0; i<device_count; i++) {
@@ -407,7 +406,6 @@ syslog(LOG_INFO, "#### YAMAUCHI #### %s", check_value);
 			goto done;
 		}
 		if (data != NULL) {
-syslog(LOG_INFO, "#### YAMAUCHI #### %lld", *(int *)data * QB_TIME_NS_IN_SEC);
 			qb_loop_timer_del(storage_mon_poll_handle, timer_handle);
 			qb_loop_timer_add(storage_mon_poll_handle,
 				QB_LOOP_MED,
@@ -452,13 +450,13 @@ storage_mon_dispatch_del(int32_t fd)
 }
 
 static int32_t
-ipcs_connection_accept_fn(qb_ipcs_connection_t * c, uid_t uid, gid_t gid)
+storage_mon_ipcs_connection_accept_fn(qb_ipcs_connection_t * c, uid_t uid, gid_t gid)
 {
 	return 0;
 }
 
 static void
-ipcs_connection_created_fn(qb_ipcs_connection_t *c)
+storage_mon_ipcs_connection_created_fn(qb_ipcs_connection_t *c)
 {
 	struct qb_ipcs_stats srv_stats;
 
@@ -468,13 +466,13 @@ ipcs_connection_created_fn(qb_ipcs_connection_t *c)
 }
 
 static void
-ipcs_connection_destroyed_fn(qb_ipcs_connection_t *c)
+storage_mon_ipcs_connection_destroyed_fn(qb_ipcs_connection_t *c)
 {
 	syslog(LOG_DEBUG, "Connection about to be freed");
 }
 
 static int32_t
-ipcs_connection_closed_fn(qb_ipcs_connection_t *c)
+storage_mon_ipcs_connection_closed_fn(qb_ipcs_connection_t *c)
 {       
 	struct qb_ipcs_connection_stats stats;
         struct qb_ipcs_stats srv_stats;
@@ -491,7 +489,7 @@ ipcs_connection_closed_fn(qb_ipcs_connection_t *c)
 }
 
 static int32_t
-ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size)
+storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size)
 {
 	struct qb_ipc_request_header *hdr;
 	struct storage_mon_check_value_req *req_pt;
@@ -522,11 +520,127 @@ ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size)
 	resps.size += rc;
 
 	res = qb_ipcs_response_sendv(c, iov, 2);
-
 	if (res < 0) {
 		errno = -res;
-		syslog(LOG_ERR, "qb_ipcs_response_send");
+		syslog(LOG_ERR, "qb_ipcs_response_send : errno = %d", errno);
 	}
+	return 0;
+}
+
+static int32_t
+storage_mon_client(void)
+{
+	struct storage_mon_check_value_req req;
+	struct storage_mon_check_value_res res;
+	qb_ipcc_connection_t *conn;
+	char ipcs_name[MAX_IPCSNAME];
+	int32_t rc;
+
+
+	snprintf(ipcs_name, MAX_IPCSNAME, "storage_mon_%s", attrname);
+	conn = qb_ipcc_connect(ipcs_name, 0);
+	if (conn == NULL) {
+		fprintf(stderr, "qb_ipcc_connect error");
+		return(-1);
+	}
+
+	snprintf(req.message, MAX_MSGSIZE, "%s", CLIENT_COMMAND);
+	req.hdr.id = QB_IPC_MSG_USER_START + 3;
+	req.hdr.size = sizeof(struct storage_mon_check_value_req);
+	rc = qb_ipcc_send(conn, &req, req.hdr.size);
+	if (rc < 0) {
+		fprintf(stderr, "qb_ipcc_send error : %d", rc);
+		return(-1);
+	}
+	if (rc > 0) {
+		rc = qb_ipcc_recv(conn, &res, sizeof(res), -1);
+		if (rc < 0) {
+			fprintf(stderr, "qb_ipcc_recv error : %d", rc);
+			return(-1);
+		}
+	}
+
+	qb_ipcc_disconnect(conn);
+
+	if (strcmp(res.message, "green") == 0) {
+		rc = 0; /* green */
+	} else {
+		rc = 1;	/* red */
+	}
+
+	syslog(LOG_DEBUG, "daemon response[%d]: %s \n", res.hdr.id, res.message);
+	return(rc);
+}
+
+static int32_t
+storage_mon_daemon(int interval, const char *pidfile)
+{
+	int32_t rc;
+	char ipcs_name[MAX_IPCSNAME];
+	enum qb_ipc_type ipc_type = QB_IPC_NATIVE;
+
+	struct qb_ipcs_service_handlers sh = {
+		.connection_accept = storage_mon_ipcs_connection_accept_fn,
+		.connection_created = storage_mon_ipcs_connection_created_fn,
+		.msg_process = storage_mon_ipcs_msg_process_fn,
+		.connection_destroyed = storage_mon_ipcs_connection_destroyed_fn,
+		.connection_closed = storage_mon_ipcs_connection_closed_fn,
+	};
+
+	struct qb_ipcs_poll_handlers ph = {
+		.job_add = storage_mon_job_add,
+		.dispatch_add = storage_mon_dispatch_add,
+		.dispatch_mod = storage_mon_dispatch_mod,
+		.dispatch_del = storage_mon_dispatch_del,
+	};
+
+	if (daemon(0, 0) < 0) {
+		syslog(LOG_ERR, "Failed to daemonize: %s", strerror(errno));
+		return -1;
+	}
+
+	umask(S_IWGRP | S_IWOTH | S_IROTH);
+
+	if (write_pid_file(pidfile) < 0) {
+		return -1;
+	}
+
+	snprintf(ipcs_name, MAX_IPCSNAME, "storage_mon_%s", attrname);
+	ipcs = qb_ipcs_create(ipcs_name, 0, ipc_type, &sh);
+	if (ipcs == 0) {
+		syslog(LOG_ERR, "qb_ipcs_create");
+		return -1;
+	}
+
+	qb_ipcs_enforce_buffer_size(ipcs, BUFF_1MEG);
+
+	storage_mon_poll_handle = qb_loop_create();
+
+	qb_ipcs_poll_handlers_set(ipcs, &ph);
+	rc = qb_ipcs_run(ipcs);
+	if (rc != 0) {
+		errno = -rc;
+		syslog(LOG_ERR, "qb_ipcs_run");
+		return -1;
+	}
+
+
+	qb_loop_signal_add(storage_mon_poll_handle, QB_LOOP_HIGH,
+		SIGTERM, NULL, sig_exit_handler, NULL);
+
+	timer_d.interval = interval;
+	qb_loop_timer_add(storage_mon_poll_handle,
+		QB_LOOP_MED,
+		0,
+		&timer_d,
+		wrap_test_device_main,
+		&timer_handle);
+
+	qb_loop_run(storage_mon_poll_handle);
+	qb_loop_destroy(storage_mon_poll_handle);
+
+	unlink(pidfile);
+
 	return 0;
 }
 
@@ -537,6 +651,7 @@ int main(int argc, char *argv[])
 	int opt, option_index;
 	int interval = DEFAULT_INTERVAL;
 	const char *pidfile = DEFAULT_PIDFILE;
+	gboolean client = FALSE;
 	struct option long_options[] = {
 		{"timeout", required_argument, 0, 't' },
 		{"device",  required_argument, 0, 'd' },
@@ -639,45 +754,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (client) {
-		struct storage_mon_check_value_req req;
-		struct storage_mon_check_value_res res;
-		qb_ipcc_connection_t *conn;
-		char ipcs_name[MAX_IPCSNAME];
-		int32_t rc;
-
-
-		snprintf(ipcs_name, MAX_IPCSNAME, "storage_mon_%s", attrname);
-		conn = qb_ipcc_connect(ipcs_name, 0);
-		if (conn == NULL) {
-			fprintf(stderr, "qb_ipcc_connect error");
-			return(-1);
-		}
-
-		snprintf(req.message, MAX_MSGSIZE, "%s", "get_check_value");
-		req.hdr.id = QB_IPC_MSG_USER_START + 3;
-		req.hdr.size = sizeof(struct storage_mon_check_value_req);
-		rc = qb_ipcc_send(conn, &req, req.hdr.size);
-		if (rc < 0) {
-			fprintf(stderr, "qb_ipcc_send error");
-			return(-1);
-		}
-		if (rc > 0) {
-			rc = qb_ipcc_recv(conn, &res, sizeof(res), -1);
-                        if (rc < 0) {
-                                fprintf(stderr, "qb_ipcc_recv error");
-                                return(-1);
-                        }
-		}
-
-		qb_ipcc_disconnect(conn);
-
-		if (strcmp(res.message, "green") == 0) {
-			rc = 0;
-		} else {
-			rc = 1;
-		}
-		syslog(LOG_DEBUG, "daemon response[%d]: %s \n", res.hdr.id, res.message);
-		return(rc);
+		return(storage_mon_client());
 	}
 
 	if (device_count == 0) {
@@ -695,72 +772,7 @@ int main(int argc, char *argv[])
 	if (!daemonize) {
 		final_score = test_device_main(NULL);
 	} else {
-		int32_t rc;
-		char ipcs_name[MAX_IPCSNAME];
-		enum qb_ipc_type ipc_type = QB_IPC_NATIVE;
-
-		struct qb_ipcs_service_handlers sh = {
-			.connection_accept = ipcs_connection_accept_fn,
-			.connection_created = ipcs_connection_created_fn,
-			.msg_process = ipcs_msg_process_fn,
-			.connection_destroyed = ipcs_connection_destroyed_fn,
-			.connection_closed = ipcs_connection_closed_fn,
-		};
-
-		struct qb_ipcs_poll_handlers ph = {
-			.job_add = storage_mon_job_add,
-			.dispatch_add = storage_mon_dispatch_add,
-			.dispatch_mod = storage_mon_dispatch_mod,
-			.dispatch_del = storage_mon_dispatch_del,
-		};
-
-		if (daemon(0, 0) < 0) {
-			syslog(LOG_ERR, "Failed to daemonize: %s", strerror(errno));
-			return -1;
-		}
-
-		umask(S_IWGRP | S_IWOTH | S_IROTH);
-
-		if (write_pid_file(pidfile) < 0) {
-			return -1;
-		}
-
-		snprintf(ipcs_name, MAX_IPCSNAME, "storage_mon_%s", attrname);
-		ipcs = qb_ipcs_create(ipcs_name, 0, ipc_type, &sh);
-		syslog(LOG_INFO, "#### YAMAUCHI ### ipcs_name : %s", ipcs_name);
-		if (ipcs == 0) {
-			syslog(LOG_ERR, "qb_ipcs_create");
-			return -1;
-		}
-		qb_ipcs_enforce_buffer_size(ipcs, BUFF_1MEG);
-
-		storage_mon_poll_handle = qb_loop_create();
-
-		qb_ipcs_poll_handlers_set(ipcs, &ph);
-		rc = qb_ipcs_run(ipcs);
-		if (rc != 0) {
-			errno = -rc;
-			syslog(LOG_ERR, "qb_ipcs_run");
-			return -1;
-		}
-
-
-		qb_loop_signal_add(storage_mon_poll_handle, QB_LOOP_HIGH,
-			SIGTERM, NULL, sig_exit_handler, NULL);
-
-		timer_d.interval = interval;
-		qb_loop_timer_add(storage_mon_poll_handle,
-			QB_LOOP_MED,
-			0,
-			&timer_d,
-			wrap_test_device_main,
-			&timer_handle);
-		qb_loop_run(storage_mon_poll_handle);
-		qb_loop_destroy(storage_mon_poll_handle);
-
-		unlink(pidfile);
-
-		return 0;
+		return(storage_mon_daemon(interval, pidfile));
 	}
 	return final_score;
 }
