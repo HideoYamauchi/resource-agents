@@ -266,6 +266,8 @@ storage-mon_monitor() {
 					break
 					;;
 				*)
+					# In case of communication error, it loops and tries to reconnect.
+					# When everything ends with a communication error during monitor, a monitor timeout occurs.
 					ocf_log debug "client monitor error : $rc"
 					;;
 			esac

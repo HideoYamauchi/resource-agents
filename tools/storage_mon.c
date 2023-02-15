@@ -32,7 +32,7 @@
 #define DEFAULT_INTERVAL 30
 #define DEFAULT_PIDFILE HA_VARRUNDIR "storage_mon.pid"
 #define DEFAULT_ATTRNAME "#health-storage_mon"
-#define CLIENT_COMMAND "get_check_value"
+#define GET_RESULT_COMMAND "get_check_value"
 #define BUFF_1MEG 1048576
 #define MAX_IPCSNAME 256
 #define MAX_MSGSIZE 128
@@ -508,7 +508,7 @@ storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size
 	syslog(LOG_DEBUG, "msg received (id:%d, size:%d, data:%s)",
 		request->hdr.id, request->hdr.size, request->message);
 
-	if (strcmp(request->message, CLIENT_COMMAND) != 0) {
+	if (strcmp(request->message, GET_RESULT_COMMAND) != 0) {
 		syslog(LOG_DEBUG, "request command is unknown.");
 		return 0;
 
@@ -550,7 +550,7 @@ storage_mon_client(void)
 		return(-1);
 	}
 
-	snprintf(request.message, MAX_MSGSIZE, "%s", CLIENT_COMMAND);
+	snprintf(request.message, MAX_MSGSIZE, "%s", GET_RESULT_COMMAND);
 	request.hdr.id = QB_IPC_MSG_USER_START + 3;
 	request.hdr.size = sizeof(struct storage_mon_check_value_req);
 	rc = qb_ipcc_send(conn, &request, request.hdr.size);
@@ -584,7 +584,7 @@ storage_mon_daemon(int interval, const char *pidfile)
 	int32_t rc;
 	char ipcs_name[MAX_IPCSNAME];
 
-	struct qb_ipcs_service_handlers sh = {
+	struct qb_ipcs_service_handlers service_handle = {
 		.connection_accept = storage_mon_ipcs_connection_accept_fn,
 		.connection_created = storage_mon_ipcs_connection_created_fn,
 		.msg_process = storage_mon_ipcs_msg_process_fn,
@@ -592,7 +592,7 @@ storage_mon_daemon(int interval, const char *pidfile)
 		.connection_closed = storage_mon_ipcs_connection_closed_fn,
 	};
 
-	struct qb_ipcs_poll_handlers ph = {
+	struct qb_ipcs_poll_handlers poll_handle = {
 		.job_add = storage_mon_job_add,
 		.dispatch_add = storage_mon_dispatch_add,
 		.dispatch_mod = storage_mon_dispatch_mod,
@@ -611,7 +611,7 @@ storage_mon_daemon(int interval, const char *pidfile)
 	}
 
 	snprintf(ipcs_name, MAX_IPCSNAME, "storage_mon_%s", attrname);
-	ipcs = qb_ipcs_create(ipcs_name, 0, QB_IPC_NATIVE, &sh);
+	ipcs = qb_ipcs_create(ipcs_name, 0, QB_IPC_NATIVE, &service_handle);
 	if (ipcs == 0) {
 		syslog(LOG_ERR, "qb_ipcs_create");
 		return -1;
@@ -621,7 +621,7 @@ storage_mon_daemon(int interval, const char *pidfile)
 
 	storage_mon_poll_handle = qb_loop_create();
 
-	qb_ipcs_poll_handlers_set(ipcs, &ph);
+	qb_ipcs_poll_handlers_set(ipcs, &poll_handle);
 	rc = qb_ipcs_run(ipcs);
 	if (rc != 0) {
 		errno = -rc;
