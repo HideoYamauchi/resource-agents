@@ -508,6 +508,12 @@ storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size
 	syslog(LOG_DEBUG, "msg received (id:%d, size:%d, data:%s)",
 		request->hdr.id, request->hdr.size, request->message);
 
+	if (strcmp(request->message, CLIENT_COMMAND) != 0) {
+		syslog(LOG_DEBUG, "request command is unknown.");
+		return 0;
+
+	}
+
 	resps.size = sizeof(struct qb_ipc_response_header);
 	resps.id = 13;
 	resps.error = 0;
