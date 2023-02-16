@@ -33,6 +33,9 @@
 #define DEFAULT_PIDFILE HA_VARRUNDIR "storage_mon.pid"
 #define DEFAULT_ATTRNAME "#health-storage_mon"
 #define GET_RESULT_COMMAND "get_check_value"
+#define MON_RESULT_OK "green"
+#define MON_RESULT_NG "red"
+#define MON_RESULT_COMMAND_ERROR "unknown command"
 #define BUFF_1MEG 1048576
 #define MAX_IPCSNAME 256
 #define MAX_MSGSIZE 128
@@ -80,7 +83,7 @@ const char *attrname = DEFAULT_ATTRNAME;
 gboolean daemonize = FALSE;
 int shutting_down = FALSE;
 static qb_ipcs_service_t *ipcs;
-const char *check_value = "";
+int final_score = 0;
 
 static qb_loop_t *storage_mon_poll_handle;
 static qb_loop_timer_handle timer_handle;
@@ -311,9 +314,8 @@ static int test_device_main(gpointer data)
 	struct timespec ts;
 	time_t start_time;
 	size_t finished_count = 0;
-	int final_score = 0;
 
-
+	final_score = 0;
 	if (daemonize && shutting_down == TRUE) {
 		goto done;
 	}
@@ -386,8 +388,6 @@ static int test_device_main(gpointer data)
 		return final_score;
 	} else {
 		int wstatus;
-		/* Update node health attribute */
-		check_value = (final_score > 0) ? "red" : "green";
 
 		/* See if threads have finished */
 		while (finished_count < device_count) {
@@ -498,6 +498,7 @@ storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size
 	struct iovec iov[2];
 	char resp[100];
 	int32_t rc;
+	int response_final_score = final_score;
 
 	hdr = (struct qb_ipc_request_header *)data;
 	if (hdr->id == (QB_IPC_MSG_USER_START + 1)) {
@@ -510,7 +511,7 @@ storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size
 
 	if (strcmp(request->message, GET_RESULT_COMMAND) != 0) {
 		syslog(LOG_DEBUG, "request command is unknown.");
-		return 0;
+		response_final_score = -1;
 
 	}
 
@@ -518,7 +519,7 @@ storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size
 	resps.id = 13;
 	resps.error = 0;
 
-	rc = snprintf(resp, 100, "%s", check_value) + 1;
+	rc = snprintf(resp, 100, "%s", (response_final_score < 0) ? MON_RESULT_COMMAND_ERROR :  (final_score > 0) ? MON_RESULT_NG : MON_RESULT_OK) + 1;
 	iov[0].iov_len = sizeof(resps);
 	iov[0].iov_base = &resps;
 	iov[1].iov_len = rc;
@@ -568,10 +569,12 @@ storage_mon_client(void)
 
 	qb_ipcc_disconnect(conn);
 
-	if (strcmp(response.message, "green") == 0) {
+	if (strcmp(response.message, MON_RESULT_OK) == 0) {
 		rc = 0; /* green */
-	} else {
+	} else if (strcmp(response.message, MON_RESULT_NG) == 0) {
 		rc = 1;	/* red */
+	} else {
+		rc = -1; /* command error */
 	}
 
 	syslog(LOG_DEBUG, "daemon response[%d]: %s \n", response.hdr.id, response.message);
@@ -652,7 +655,6 @@ storage_mon_daemon(int interval, const char *pidfile)
 int main(int argc, char *argv[])
 {
 	size_t score_count = 0;
-	int final_score = 0;
 	int opt, option_index;
 	int interval = DEFAULT_INTERVAL;
 	const char *pidfile = DEFAULT_PIDFILE;
