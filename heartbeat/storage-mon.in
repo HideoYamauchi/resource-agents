@@ -256,21 +256,18 @@ storage-mon_monitor() {
 		while :
 		do
 			$STORAGEMON $cmdline
-			case $? in
-				0)
-					status="green"
-					break
-					;;
-				1)
-					status="red"
-					break
-					;;
-				*)
-					# In case of communication error, it loops and tries to reconnect.
-					# When everything ends with a communication error during monitor, a monitor timeout occurs.
-					ocf_log debug "client monitor error : $rc"
-					;;
-			esac
+			rc=$?
+			if [ $rc -eq 0 ]; then
+				status="green"
+				break
+			elif [ $rc -gt 0 ]; then
+				status="red"
+				break
+			else
+				# In case of communication error, it loops and tries to reconnect.
+				# When everything ends with a communication error during monitor, a monitor timeout occurs.
+				ocf_log debug "client monitor error : $rc"
+			fi
 		done
 
 		"$ATTRDUP" -n ${ATTRNAME} -U "$status" -d "5s"

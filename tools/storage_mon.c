@@ -519,7 +519,10 @@ storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size
 	resps.id = 13;
 	resps.error = 0;
 
+#if 0
 	rc = snprintf(resp, 100, "%s", (response_final_score < 0) ? MON_RESULT_COMMAND_ERROR :  (final_score > 0) ? MON_RESULT_NG : MON_RESULT_OK) + 1;
+#endif
+	rc = snprintf(resp, 100, "%d", response_final_score) + 1;
 	iov[0].iov_len = sizeof(resps);
 	iov[0].iov_base = &resps;
 	iov[1].iov_len = rc;
@@ -557,25 +560,23 @@ storage_mon_client(void)
 	rc = qb_ipcc_send(conn, &request, request.hdr.size);
 	if (rc < 0) {
 		fprintf(stderr, "qb_ipcc_send error : %d", rc);
-		return(-1);
+		return(rc);
 	}
 	if (rc > 0) {
 		rc = qb_ipcc_recv(conn, &response, sizeof(response), -1);
 		if (rc < 0) {
 			fprintf(stderr, "qb_ipcc_recv error : %d", rc);
-			return(-1);
+			return(rc);
 		}
 	}
 
 	qb_ipcc_disconnect(conn);
 
-	if (strcmp(response.message, MON_RESULT_OK) == 0) {
-		rc = 0; /* green */
-	} else if (strcmp(response.message, MON_RESULT_NG) == 0) {
-		rc = 1;	/* red */
-	} else {
-		rc = -1; /* command error */
-	}
+	/* Set score to result */
+	/* 0: Normal. */
+	/* greater than 0: monitoring error. */
+	/* Negative number: communication system error. */
+	rc = atoi(response.message);
 
 	syslog(LOG_DEBUG, "daemon response[%d]: %s \n", response.hdr.id, response.message);
 	return(rc);
