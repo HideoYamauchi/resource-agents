@@ -550,7 +550,7 @@ storage_mon_client(void)
 	snprintf(ipcs_name, MAX_IPCSNAME, "storage_mon_%s", attrname);
 	conn = qb_ipcc_connect(ipcs_name, 0);
 	if (conn == NULL) {
-		fprintf(stderr, "qb_ipcc_connect error");
+		fprintf(stderr, "qb_ipcc_connect error\n");
 		return(-1);
 	}
 
@@ -559,13 +559,13 @@ storage_mon_client(void)
 	request.hdr.size = sizeof(struct storage_mon_check_value_req);
 	rc = qb_ipcc_send(conn, &request, request.hdr.size);
 	if (rc < 0) {
-		fprintf(stderr, "qb_ipcc_send error : %d", rc);
+		fprintf(stderr, "qb_ipcc_send error : %d\n", rc);
 		return(rc);
 	}
 	if (rc > 0) {
 		rc = qb_ipcc_recv(conn, &response, sizeof(response), -1);
 		if (rc < 0) {
-			fprintf(stderr, "qb_ipcc_recv error : %d", rc);
+			fprintf(stderr, "qb_ipcc_recv error : %d\n", rc);
 			return(rc);
 		}
 	}
