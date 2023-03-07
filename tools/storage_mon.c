@@ -491,7 +491,6 @@ storage_mon_ipcs_connection_closed_fn(qb_ipcs_connection_t *c)
 static int32_t
 storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size)
 {
-	struct qb_ipc_request_header *hdr;
 	struct storage_mon_check_value_req *request;
 	struct qb_ipc_response_header resps;
 	ssize_t res;
@@ -499,11 +498,6 @@ storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size
 	char resp[100];
 	int32_t rc;
 	int response_final_score = final_score;
-
-	hdr = (struct qb_ipc_request_header *)data;
-	if (hdr->id == (QB_IPC_MSG_USER_START + 1)) {
-		return 0;
-	}
 
 	request = (struct storage_mon_check_value_req *)data;
 	syslog(LOG_DEBUG, "msg received (id:%d, size:%d, data:%s)",
@@ -552,7 +546,7 @@ storage_mon_client(void)
 	}
 
 	snprintf(request.message, MAX_MSGSIZE, "%s", GET_RESULT_COMMAND);
-	request.hdr.id = QB_IPC_MSG_USER_START + 3;
+	request.hdr.id = 0;
 	request.hdr.size = sizeof(struct storage_mon_check_value_req);
 	rc = qb_ipcc_send(conn, &request, request.hdr.size);
 	if (rc < 0) {
