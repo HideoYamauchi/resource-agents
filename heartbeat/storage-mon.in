@@ -255,6 +255,10 @@ storage-mon_monitor() {
 		cmdline="$cmdline --client --attrname ${ATTRNAME}"
 		while :
 		do
+			# 0			: Normal.
+			# greater than 0	: monitoring error.
+			# 255(-1)		: communication system error.
+			# 254(-2)		: Not all checks completed for first device in daemon mode.
 			$STORAGEMON $cmdline
 			rc=$?
 			case "$rc" in
