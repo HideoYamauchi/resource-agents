@@ -235,20 +235,12 @@ error:
 static void stop_child(pid_t pid, int signal)
 {
 	errno = 0;
-#if 1
-syslog(LOG_INFO, "#### YAMAUCHI #### stop_child() start");
-#endif
+
     	if (kill(pid, signal) == 0) {
        		syslog(LOG_DEBUG, "Stopping chilg sent signal %d to process %lld", signal, (long long) pid);
-#if 1
-syslog(LOG_INFO, "#### YAMAUCHI #### Stopping chilg sent signal %d to process %lld", signal, (long long) pid);
-#endif
     	} else {
         	syslog(LOG_ERR, "Could not stop child (process %lld) with signal %d: %s", (long long) pid, signal, strerror(errno));
    	}
-#if 1
-syslog(LOG_INFO, "#### YAMAUCHI #### stop_child() start");
-#endif
 }
 
 static int32_t sigterm_handler(int num, void *data)
@@ -296,10 +288,6 @@ static int32_t sigchld_handler(int32_t sig, void *data)
 	size_t index;
 	int status;
 
-#if 1
-      	syslog(LOG_INFO, "#### YAMAUCHI #### sigchld_handler() start");
-#endif
-
 	if (finished_count < device_count) {
 		while(1) {
 			pid = waitpid(-1, &status, WNOHANG);
@@ -321,10 +309,6 @@ static int32_t sigchld_handler(int32_t sig, void *data)
 							test_forks[index] = 0;
 						}
 					
-#if 1
-syslog(LOG_INFO, "#### YAMAUCHI #### sigchld_handler() find finish : %d (finished_count %ld : device_count : %ld)", pid,
-					finished_count, device_count);
-#endif
 					}
 				}
 			} else {
@@ -332,9 +316,6 @@ syslog(LOG_INFO, "#### YAMAUCHI #### sigchld_handler() find finish : %d (finishe
 			}
 		}
 	}
-#if 1
-      	syslog(LOG_INFO, "#### YAMAUCHI #### sigchld_handler() end : final_score : %d", final_score);
-#endif
 	return 0;
 }
 
@@ -482,8 +463,7 @@ static int test_device_main(gpointer data)
 		for (i=0; i<device_count; i++) {
 			test_forks[i] = fork();
 			if (test_forks[i] < 0) {
-				fprintf(stderr, "Error spawning fork for %s: %s\n", devices[i], strerror(errno));
-				syslog(LOG_ERR, "Error spawning fork for %s: %s\n", devices[i], strerror(errno));
+				PRINT_STORAGE_MON_ERR("Error spawning fork for %s: %s\n", devices[i], strerror(errno));
 				/* Just test the devices we have */
 				break;
 			}
@@ -685,7 +665,7 @@ storage_mon_client(void)
 	snprintf(ipcs_name, SMON_MAX_IPCSNAME, "storage_mon_%s", attrname);
 	conn = qb_ipcc_connect(ipcs_name, 0);
 	if (conn == NULL) {
-		fprintf(stderr, "qb_ipcc_connect error\n");
+		syslog(LOG_ERR, "qb_ipcc_connect error\n");
 		return(-1);
 	}
 
@@ -694,13 +674,13 @@ storage_mon_client(void)
 	request.hdr.size = sizeof(struct storage_mon_check_value_req);
 	rc = qb_ipcc_send(conn, &request, request.hdr.size);
 	if (rc < 0) {
-		fprintf(stderr, "qb_ipcc_send error : %d\n", rc);
+		syslog(LOG_ERR, "qb_ipcc_send error : %d\n", rc);
 		return(rc);
 	}
 	if (rc > 0) {
 		rc = qb_ipcc_recv(conn, &response, sizeof(response), -1);
 		if (rc < 0) {
-			fprintf(stderr, "qb_ipcc_recv error : %d\n", rc);
+			syslog(LOG_ERR, "qb_ipcc_recv error : %d\n", rc);
 			return(rc);
 		}
 	}
