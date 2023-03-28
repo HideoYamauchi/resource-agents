@@ -452,8 +452,16 @@ static int test_device_main(gpointer data)
       			syslog(LOG_INFO, "#### YAMAUCHI #### test_device_main() Skipped device_check");
 		}
 #endif
-		if (device_count == finished_count && !daemon_check_first_all_devices) {
-			daemon_check_first_all_devices = TRUE;
+		if (device_count == finished_count && device_check) { 
+			/* Update the result value for the client response once all checks have completed. */
+			response_final_score = final_score;
+#if 1
+syslog(LOG_INFO, "#### YAMAUCHI #### test_device_main() : response_final_score - %d", response_final_score); 
+#endif
+
+			if (!daemon_check_first_all_devices) {
+				daemon_check_first_all_devices = TRUE;
+			}
 		}
 	}
 
