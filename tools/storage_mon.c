@@ -88,6 +88,7 @@ int final_score = 0;
 int response_final_score = 0;
 pid_t test_forks[MAX_DEVICES];
 size_t finished_count = 0;
+gboolean daemon_check_first_all_devices = FALSE;
 
 static qb_loop_t *storage_mon_poll_handle;
 static qb_loop_timer_handle timer_handle;
@@ -232,6 +233,18 @@ error:
 	exit(-1);
 }
 
+static gboolean is_child_runnning(void)
+{
+	size_t i;
+
+	for (i=0; i<device_count; i++) {
+		if (test_forks[i] != 0) {
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 static void stop_child(pid_t pid, int signal)
 {
 	errno = 0;
@@ -252,7 +265,7 @@ static int32_t sigterm_handler(int num, void *data)
 	qb_loop_timer_del(storage_mon_poll_handle, timer_handle);
 
 	/* Send SIGTERM to non-terminating device monitoring processes. */
-	if (finished_count < device_count) {
+	if (is_child_runnning()) {
 		/* See if threads have finished */
 		for (i=0; i<device_count; i++) {
 			if (test_forks[i] > 0 ) {
@@ -288,7 +301,7 @@ static int32_t sigchld_handler(int32_t sig, void *data)
 	size_t index;
 	int status;
 
-	if (finished_count < device_count) {
+	if (is_child_runnning()) {
 		while(1) {
 			pid = waitpid(-1, &status, WNOHANG);
 			if (pid > 0) {
@@ -300,8 +313,13 @@ static int32_t sigchld_handler(int32_t sig, void *data)
 						if (qb_loop_timer_is_running(storage_mon_poll_handle, expire_handle)) { 
 							if (WEXITSTATUS(status) !=0) {
 								final_score += scores[index];
+
 								/* Update response values immediately in preparation for inquiries from clients. */
 								response_final_score = final_score;
+
+								/* Even in the first demon mode check, if there is an error device, clear */
+								/* the flag to return the response to the client without waiting for all devices to finish. */
+								daemon_check_first_all_devices = TRUE;
 							}
 						}
 						if (shutting_down == FALSE) {
@@ -384,10 +402,8 @@ done:
 static void child_timeout_handler(void *data)
 {
 	size_t i;
-#if 1
-      	syslog(LOG_INFO, "#### YAMAUCHI #### child_timeout_handler() start");
-#endif
-	if (finished_count < device_count) {
+
+	if (is_child_runnning()) {
 		for (i=0; i<device_count; i++) {
 			if (test_forks[i] > 0) {
 				/* If timeout occurs before SIGCHLD, add child process failure score to final_score. */
@@ -395,27 +411,13 @@ static void child_timeout_handler(void *data)
 
 				/* Update response values immediately in preparation for inquiries from clients. */
 				response_final_score = final_score;
-#if 1
-syslog(LOG_INFO, "#### YAMAUCHI #### child_timeout_handler() : pid : %d final_score : %d", test_forks[i], final_score);
-#endif
+
+				/* Even in the first demon mode check, if there is an error device, clear */
+				/* the flag to return the response to the client without waiting for all devices to finish. */
+				daemon_check_first_all_devices = TRUE;
 			}
 		}
 	}
-#if 1
-      	syslog(LOG_INFO, "#### YAMAUCHI #### child_timeout_handler() end");
-#endif
-}
-
-static gboolean is_child_runnning(void)
-{
-	size_t i;
-
-	for (i=0; i<device_count; i++) {
-		if (test_forks[i] != 0) {
-			return TRUE;
-		}
-	}
-	return FALSE;
 }
 
 static void wrap_test_device_main(void *data)
@@ -445,13 +447,21 @@ static int test_device_main(gpointer data)
 			device_check = FALSE;
 		}
 		
+#if 0
 		/* Update the value for the response after the check is completed in preparation for the inquiry from the client. */		
 		response_final_score = final_score;
+#endif
 #if 1
 		if (device_check == FALSE) {
       			syslog(LOG_INFO, "#### YAMAUCHI #### test_device_main() Skipped device_check");
 		}
 #endif
+		if (device_count == finished_count && !daemon_check_first_all_devices) {
+			daemon_check_first_all_devices = TRUE;
+#if 1
+      			syslog(LOG_INFO, "#### YAMAUCHI #### test_device_main() : clear daemon_check_first_all_devices = TRUE");
+#endif
+		}
 	}
 
 	if (device_check) {
@@ -622,6 +632,7 @@ storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size
 	struct iovec iov[2];
 	char resp[SMON_MAX_RESP_SIZE];
 	int32_t rc;
+	int send_score = response_final_score;
 
 	request = (struct storage_mon_check_value_req *)data;
 	syslog(LOG_DEBUG, "msg received (id:%d, size:%d, data:%s)",
@@ -629,15 +640,16 @@ storage_mon_ipcs_msg_process_fn(qb_ipcs_connection_t *c, void *data, size_t size
 
 	if (strcmp(request->message, SMON_GET_RESULT_COMMAND) != 0) {
 		syslog(LOG_DEBUG, "request command is unknown.");
-		response_final_score = -1;
-
+		send_score = -1;
+	} else if (!daemon_check_first_all_devices) {
+		send_score = -2;
 	}
 
 	resps.size = sizeof(struct qb_ipc_response_header);
 	resps.id = 13;
 	resps.error = 0;
 
-	rc = snprintf(resp, SMON_MAX_RESP_SIZE, "%d", response_final_score) + 1;
+	rc = snprintf(resp, SMON_MAX_RESP_SIZE, "%d", send_score) + 1;
 	iov[0].iov_len = sizeof(resps);
 	iov[0].iov_base = &resps;
 	iov[1].iov_len = rc;
@@ -675,25 +687,29 @@ storage_mon_client(void)
 	rc = qb_ipcc_send(conn, &request, request.hdr.size);
 	if (rc < 0) {
 		syslog(LOG_ERR, "qb_ipcc_send error : %d\n", rc);
-		return(rc);
+		return(-1);
 	}
 	if (rc > 0) {
 		rc = qb_ipcc_recv(conn, &response, sizeof(response), -1);
 		if (rc < 0) {
 			syslog(LOG_ERR, "qb_ipcc_recv error : %d\n", rc);
-			return(rc);
+			return(-1);
 		}
 	}
 
 	qb_ipcc_disconnect(conn);
 
 	/* Set score to result */
-	/* 0: Normal. */
-	/* greater than 0: monitoring error. */
-	/* Negative number: communication system error. */
+	/* 0			: Normal. 			*/
+	/* greater than 0	: monitoring error. 		*/
+	/* -1			: communication system error.	*/
+	/* -2                   : Not all checks completed for first device in daemon mode. */ 
 	rc = atoi(response.message);
 
 	syslog(LOG_DEBUG, "daemon response[%d]: %s \n", response.hdr.id, response.message);
+#if 1
+syslog(LOG_INFO, "#### YAMAUCHI ##### daemon response[%d]: %s [%d] \n", response.hdr.id, response.message, response.hdr.error);
+#endif
 	return(rc);
 }
 

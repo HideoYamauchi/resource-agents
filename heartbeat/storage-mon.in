@@ -264,7 +264,7 @@ storage-mon_monitor() {
 				status="red"
 				break
 			else
-				# In case of communication error, it loops and tries to reconnect.
+				# If there is a communication error or the initial check of all devices has not been completed, it will loop and try to reconnect.
 				# When everything ends with a communication error during monitor, a monitor timeout occurs.
 				ocf_log debug "client monitor error : $rc"
 			fi
