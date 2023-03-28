@@ -126,7 +126,7 @@ static void *test_device(const char *device, int verbose, int inject_error_perce
 	if (verbose) {
 		printf("Testing device %s\n", device);
 	}
-#if 1
+#if 0
 /* YAMAUCHI */
 	sleep(15);
 #endif
