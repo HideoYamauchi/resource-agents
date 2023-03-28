@@ -257,17 +257,22 @@ storage-mon_monitor() {
 		do
 			$STORAGEMON $cmdline
 			rc=$?
-			if [ $rc -eq 0 ]; then
-				status="green"
-				break
-			elif [ $rc -gt 0 ]; then
-				status="red"
-				break
-			else
-				# If there is a communication error or the initial check of all devices has not been completed, it will loop and try to reconnect.
-				# When everything ends with a communication error during monitor, a monitor timeout occurs.
-				ocf_log debug "client monitor error : $rc"
-			fi
+			case "$rc" in
+				254|255)
+					# If there is a communication error or the initial check of all devices has not been completed, 
+					# it will loop and try to reconnect.
+					# When everything ends with a communication error during monitor, a monitor timeout occurs.
+					ocf_log debug "client monitor error : $rc"
+					;;
+				0)
+					status="green"
+					break
+					;;
+				*)
+					status="red"
+					break
+					;;
+			esac
 		done
 
 		"$ATTRDUP" -n ${ATTRNAME} -U "$status" -d "5s"

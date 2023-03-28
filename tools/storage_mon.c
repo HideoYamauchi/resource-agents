@@ -447,10 +447,6 @@ static int test_device_main(gpointer data)
 			device_check = FALSE;
 		}
 		
-#if 0
-		/* Update the value for the response after the check is completed in preparation for the inquiry from the client. */		
-		response_final_score = final_score;
-#endif
 #if 1
 		if (device_check == FALSE) {
       			syslog(LOG_INFO, "#### YAMAUCHI #### test_device_main() Skipped device_check");
@@ -458,9 +454,6 @@ static int test_device_main(gpointer data)
 #endif
 		if (device_count == finished_count && !daemon_check_first_all_devices) {
 			daemon_check_first_all_devices = TRUE;
-#if 1
-      			syslog(LOG_INFO, "#### YAMAUCHI #### test_device_main() : clear daemon_check_first_all_devices = TRUE");
-#endif
 		}
 	}
 
@@ -531,9 +524,6 @@ static int test_device_main(gpointer data)
 				}
 			}
 		} else {
-#if 1
-    syslog(LOG_INFO, "#### YAMAUCHI #### test_device_main() : expire_handle() timer set :  score  : %d", final_score);
-#endif
 			/* Rrun the child process timeout watch timer. */
 			qb_loop_timer_add(storage_mon_poll_handle, QB_LOOP_MED, timeout * QB_TIME_NS_IN_SEC, NULL, child_timeout_handler, &expire_handle); 
 		}
@@ -707,9 +697,7 @@ storage_mon_client(void)
 	rc = atoi(response.message);
 
 	syslog(LOG_DEBUG, "daemon response[%d]: %s \n", response.hdr.id, response.message);
-#if 1
-syslog(LOG_INFO, "#### YAMAUCHI ##### daemon response[%d]: %s [%d] \n", response.hdr.id, response.message, response.hdr.error);
-#endif
+
 	return(rc);
 }
 
