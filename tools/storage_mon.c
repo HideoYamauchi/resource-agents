@@ -318,10 +318,14 @@ static int32_t sigchld_handler(int32_t sig, void *data)
 								daemon_check_first_all_devices = TRUE;
 							}
 						}
+#if 0
 						if (shutting_down == FALSE) {
 							finished_count++;
 							test_forks[index] = 0;
 						}
+#endif
+						finished_count++;
+						test_forks[index] = 0;
 					
 					}
 				}
