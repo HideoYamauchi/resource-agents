@@ -432,7 +432,7 @@ static int test_device_main(gpointer data)
 	struct timespec ts;
 	time_t start_time;
 	gboolean device_check = TRUE;
-
+syslog(LOG_INFO, "#### YAMAUCHI #### test_device_main() call : %d", timer_d.interval);
 	if (daemonize) {
 		if (shutting_down == TRUE) {
 			goto done;
@@ -533,7 +533,7 @@ static int test_device_main(gpointer data)
 	} else {
 		if (data != NULL) {
 			/* Sets the device check to run on the next timer. */
-			qb_loop_timer_add(storage_mon_poll_handle, QB_LOOP_MED, timeout * QB_TIME_NS_IN_SEC, &timer_d, wrap_test_device_main, &timer_handle); 
+			qb_loop_timer_add(storage_mon_poll_handle, QB_LOOP_MED, timer_d.interval * QB_TIME_NS_IN_SEC, &timer_d, wrap_test_device_main, &timer_handle); 
 		}
 		return TRUE;
 	}
