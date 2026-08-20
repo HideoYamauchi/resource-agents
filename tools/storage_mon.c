@@ -315,7 +315,7 @@ static int32_t sigchld_handler(int32_t sig, void *data)
 								daemon_check_first_all_devices = TRUE;
 							}
 							/* To prevent the timer from triggering when the timeout is set to a value greater */ 
-							/* than the interval, the monitoring timer is stopped once the check of all devices is complete. */
+							/* than the interval, the io_timeout timer is stopped once the check of all devices is complete. */
 							if (qb_loop_timer_is_running(storage_mon_poll_handle, expire_handle)) { 
 								qb_loop_timer_del(storage_mon_poll_handle, expire_handle);
 							}
@@ -398,6 +398,7 @@ static void child_timeout_handler(void *data)
 {
 	size_t i;
 
+	syslog(LOG_INFO, "#### YAMAUCHI ##### child_timeout_handler() call");
 	if (is_child_runnning()) {
 		for (i=0; i<device_count; i++) {
 			if (test_forks[i] > 0) {
@@ -461,6 +462,12 @@ static int test_device_main(gpointer data)
 				if (daemonize) {
 					signal(SIGTERM, &child_shutdown);
 				}
+				PRINT_STORAGE_MON_INFO("#### YAMAUCHI fork child : %ld", i);
+#if 0
+                                if (i == 0) {
+                                    sleep(20);
+                                }
+#endif
 				test_device(devices[i], verbose, inject_error_percent);
 			}
 		}
