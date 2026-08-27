@@ -457,8 +457,8 @@ check_systemd_integration() {
     local rc=1
 
     if which "$SYSTEMCTL" 1>/dev/null 2>/dev/null; then
-        if $SYSTEMCTL list-unit-files | \
-            awk '$1 == service { found=1 } END { if (! found) {exit 1}}' service="${systemd_unit_name}.service"; then
+        # use list-unit-files with expected unit-file to limit systemd load; this also allows to use the return-code of systemctl
+        if $SYSTEMCTL list-unit-files "${systemd_unit_name}.service" >/dev/null ; then
             rc=0
         else
             rc=1
