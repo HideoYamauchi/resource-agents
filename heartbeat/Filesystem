@@ -1065,16 +1065,16 @@ Filesystem_monitor_10()
 {
 	RDEVICE=$DEVICE
 	if [ "$blockdevice" = "no" ] ; then
-                if [ ! -z "$use_check_blkid_opt" ] ; then
-                        RDEVICE=`blkid ${use_check_blkid_opt} ${DEVICE}`
+		if [ ! -z "$use_check_blkid_opt" ] ; then
+			RDEVICE=`blkid ${use_check_blkid_opt} ${DEVICE}`
 			if [ -z "$RDEVICE" ]; then
-                                ocf_log warn "$DEVICE is not a block device, monitor 10 is noop"
+				ocf_log warn "$DEVICE is not a block device, monitor 10 is noop"
 				return $OCF_SUCCESS
-                        fi
-                else
-                        ocf_log warn "$DEVICE is not a block device, monitor 10 is noop"
-                        return $OCF_SUCCESS
-                fi
+			fi
+		else
+			ocf_log warn "$DEVICE is not a block device, monitor 10 is noop"
+			return $OCF_SUCCESS
+		fi
 	fi
 	dd_opts="iflag=direct bs=4k count=1"
 	err_output=$(dd if="$RDEVICE" $dd_opts 2>&1 >/dev/null)
