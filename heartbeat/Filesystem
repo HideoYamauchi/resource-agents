@@ -1067,6 +1067,13 @@ Filesystem_monitor_10()
 	monitor_10_err_config="no"
 	if [ "$blockdevice" = "no" ] ; then
 		if [ ! -z "$use_check_blkid_opt" ] ; then
+			if [ "$use_check_blkid_opt" = "-L" ]; then
+				blkcount=$(blkid | grep LABEL=\"${DEVICE}\" | wc -l)
+				if [ $blkcount -ne 1 ]; then
+					ocf_exit_reason "$DEVICE is duplicated label device, monitor 10 cannot be executed. Please check OCF_RESKEY_device parameter and OCF_CHECK_LEVEL attribute for the monitor operation."
+					return $OCF_ERR_CONFIGURED
+				fi
+			fi
 			RDEVICE=`blkid ${use_check_blkid_opt} ${DEVICE}`
 			if [ -z "$RDEVICE" ]; then
 				monitor_10_err_config="yes"
